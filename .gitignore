@@ -1,0 +1,45 @@
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+
+# Logs
+*.log
+logs/
+
+# Build / dependency directories — add stack-specific ones below
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+target/
+
+# Coverage / test artifacts
+coverage/
+.nyc_output/
+.coverage
+htmlcov/
+
+# Local Claude Code overrides (not shared with team)
+.claude/settings.local.json
