@@ -1,0 +1,65 @@
+{
+  "name": "@altimist/altimist-id-consumer",
+  "version": "0.1.0",
+  "description": "Consumer-side library for AltimistID auth in Next.js apps — the ADR-031 Node-runtime middleware choke point (DB-backed sessions, default-deny route policy, VC-derived roles, hosted-handoff popup login) as an installable package. Counterpart to @altimist/did-web-client.",
+  "private": false,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./prisma": {
+      "types": "./dist/prisma.d.ts",
+      "import": "./dist/prisma.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "import": "./dist/browser.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CLAUDE.md"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:cov": "vitest run --coverage",
+    "lint": "echo \"(no lint configured)\" && exit 0",
+    "prepublishOnly": "npm test && npm run build"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "dependencies": {
+    "@altimist/did-web-client": "^0.7.2",
+    "iron-session": "^8.0.4",
+    "zod": "^3.23.8"
+  },
+  "peerDependencies": {
+    "next": ">=15.5.0",
+    "@prisma/client": ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@prisma/client": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@vitest/coverage-v8": "^4.1.8",
+    "next": "^15.5.19",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.8"
+  }
+}
