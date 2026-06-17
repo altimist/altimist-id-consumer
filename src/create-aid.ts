@@ -14,7 +14,12 @@ import { evaluate, type Caller, type PolicyDecision } from './policy.js';
 export interface Aid {
   /** Bind in `middleware.ts`: `export const middleware = aid.middleware`. */
   middleware: (req: NextRequest) => Promise<NextResponse>;
-  /** Bind in `middleware.ts`: `export const config = aid.middlewareConfig`. */
+  /**
+   * Reference values for the middleware `config`. NOTE: Next requires `config` to
+   * be a STATIC object literal, so you cannot do `export const config =
+   * aid.middlewareConfig`. Copy the `{ runtime: 'nodejs', matcher: [...] }` literal
+   * into your `middleware.ts` (see the README). This field is for reference only.
+   */
   middlewareConfig: { runtime: 'nodejs'; matcher: string[] };
   /** Route-handler factories; mount each at its canonical path (one-line re-export). */
   routes: AidRoutes;

@@ -43,3 +43,6 @@ htmlcov/
 
 # Local Claude Code overrides (not shared with team)
 .claude/settings.local.json
+
+# npm pack artifacts
+*.tgz
