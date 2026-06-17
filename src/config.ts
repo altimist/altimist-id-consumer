@@ -18,10 +18,19 @@ import {
 export interface AidConfig {
   /** The data-layer seam — required (see `prismaStore` for the canonical case). */
   store: AidStore;
-  /** iron-session sealing key, ≥32 chars — required, never defaulted. */
-  sessionPassword: string;
-  /** Consumer-app identifier; must match an `AppPolicy.appId` on altimist.id. */
-  appId: string;
+  /**
+   * iron-session sealing key, ≥32 chars. Optional at the type level because it is
+   * normally supplied via `configFromEnv()` (which spreads in `SESSION_PASSWORD`);
+   * `resolveConfig` throws at startup if it is missing or too short, so it is
+   * effectively required and fail-closed.
+   */
+  sessionPassword?: string;
+  /**
+   * Consumer-app identifier; must match an `AppPolicy.appId` on altimist.id.
+   * Optional at the type level for the same reason as `sessionPassword` (usually
+   * from `ALTIMIST_APP_ID` via `configFromEnv()`); validated at startup.
+   */
+  appId?: string;
 
   // identity / verification (defaulted to altimist.id production values)
   /** `did:web` host eTLD+1s this consumer trusts. Default `[resolverDomain]`. */

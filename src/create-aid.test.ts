@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createAid } from './create-aid.js';
+import { configFromEnv } from './config.js';
 import { inMemoryStore, TEST_SESSION_PASSWORD, type InMemoryStore } from './test-helpers.js';
 
 function make(store: InMemoryStore) {
@@ -27,6 +28,21 @@ describe('createAid — wiring', () => {
     expect(typeof aid.routes.logout.POST).toBe('function');
     expect(typeof aid.routes.me.GET).toBe('function');
     expect(typeof aid.routes.callback.GET).toBe('function');
+  });
+
+  it('accepts the configFromEnv() spread pattern (sessionPassword/appId from env)', () => {
+    const prev = { sp: process.env.SESSION_PASSWORD, app: process.env.ALTIMIST_APP_ID };
+    process.env.SESSION_PASSWORD = 'x'.repeat(40);
+    process.env.ALTIMIST_APP_ID = 'env-app';
+    try {
+      // This is the canonical greenfield pattern; it must both typecheck (spread
+      // of Partial<AidConfig>) and construct at runtime.
+      const aid = createAid({ ...configFromEnv(), store: inMemoryStore() });
+      expect(aid.middlewareConfig.runtime).toBe('nodejs');
+    } finally {
+      process.env.SESSION_PASSWORD = prev.sp;
+      process.env.ALTIMIST_APP_ID = prev.app;
+    }
   });
 
   it('evaluate applies the resolved (merged) policy', () => {

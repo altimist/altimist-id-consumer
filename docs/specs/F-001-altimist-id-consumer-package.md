@@ -152,8 +152,8 @@ export type Role = 'staff' | 'visitor';
 
 export interface AidConfig {
   store: AidStore;                       // required — the data seam
-  sessionPassword: string;               // required, ≥32 chars (no default)
-  appId: string;                         // matches an altimist.id AppPolicy.appId
+  sessionPassword?: string;              // ≥32 chars; usually via configFromEnv(); runtime-validated
+  appId?: string;                        // matches an altimist.id AppPolicy.appId; usually via env
   // identity / verification (all defaulted to the altimist.id production values)
   allowedIssuers?: readonly string[];    // eTLD+1 hosts; default [resolverDomain]
   resolverDomain?: string;               // default 'altimist.com'
@@ -215,17 +215,24 @@ app/api/auth/logout/route.ts                  → export const { POST } = aid.ro
 app/api/auth/me/route.ts                       → export const { GET }  = aid.routes.me
 app/auth/altimist/callback/route.ts            → export const { GET }  = aid.routes.callback
 middleware.ts                                  → export const middleware = aid.middleware;
-                                                 export const config = aid.middlewareConfig;
+                                                 export const config = { runtime: 'nodejs', matcher: [...] }  // STATIC literal
 ```
+
+> **Dogfood finding (2026-06-17):** Next's static analysis cannot read a runtime
+> value for the middleware `config`, so `export const config = aid.middlewareConfig`
+> fails the build (and silently falls back to Edge, where the verification deps
+> can't load). The consumer must write a static `{ runtime: 'nodejs', matcher: [...] }`
+> literal. `aid.middlewareConfig` remains as a reference value only.
 
 ### `/prisma`
 
 ```ts
-import type { PrismaClient } from '@prisma/client';
-export function prismaStore(prisma: PrismaClient): AidStore;
+export function prismaStore(prisma: PrismaLike): AidStore;
 ```
 
-Assumes the canonical models (below). The only place `@prisma/client` is imported.
+Assumes the canonical models (below). `PrismaLike` is a minimal structural type
+(not an `@prisma/client` import), so the package builds with no Prisma dependency
+and no `prisma generate` step; a real `PrismaClient` satisfies it structurally.
 
 ### `/browser`
 

@@ -57,9 +57,23 @@ export const aid = createAid({
 ```ts
 // middleware.ts
 import { aid } from '@/lib/aid';
+
 export const middleware = aid.middleware;
-export const config = aid.middlewareConfig; // { runtime: 'nodejs', matcher: [...] }
+
+// Next requires `config` to be a STATIC object literal — it cannot read a runtime
+// value (so `export const config = aid.middlewareConfig` does NOT work). The
+// `runtime: 'nodejs'` is load-bearing: without it the middleware runs on Edge,
+// where the verification deps can't load. Copy this literal verbatim.
+export const config = {
+  runtime: 'nodejs',
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|manifest.json|robots.txt|sw.js|.*\\.(?:svg|png|ico|jpg|jpeg|webp|gif|js|css|map|txt|woff2?|webmanifest)$).*)',
+  ],
+};
 ```
+
+> `aid.middlewareConfig` exposes the same `{ runtime, matcher }` for reference, but
+> Next's static analysis means you must write the literal above in `middleware.ts`.
 
 **3. The auth routes (one line each, mounted at the canonical paths):**
 
