@@ -1,4 +1,4 @@
-<!-- Altimist Baseline v5 — START -->
+<!-- Altimist Baseline v6 — START -->
 
 ## Working Principles
 
@@ -73,6 +73,17 @@ Before implementing a substantial feature, check for an existing spec in `docs/s
 **When unsure, ask the user:** *"This feels substantial — should I draft a spec in `docs/specs/` first?"*
 
 **For projects without a `docs/specs/` folder:** the spec-first rule doesn't apply — use the project's own conventions.
+
+## Altimist Claude Code tooling
+
+The [Altimist plugin](https://github.com/altimist/altimist-claude-plugin) ships team skills plus a verification gate. When it's installed (one-time setup: `altimist-claude-config/docs/runbooks/install-plugin.md`), prefer it over hand-rolling:
+
+- **Spec a feature** → `/create-feature-spec` (interview → user stories, goals, acceptance criteria), then `/implement-spec` for the red→green→refactor loop — the easiest way to satisfy the **Spec-First** rule above.
+- **Second opinion on a change** → `/review` — spec-aware adversarial review; `--codex` / `--both` adds a cross-vendor pass.
+- **Read a PDF / Word doc** → `/doc2md` (see the **Reading Documents** section).
+- **Verification gate** — runs the project's typecheck → lint → test before a code-changing turn can finish, and blocks until they pass (`VERIFY_OFF=1` bypasses for a session). Makes **Goal-Driven Execution** a mechanism, not a reminder.
+
+If the plugin isn't installed these skills won't resolve — install it once per machine and restart Claude Code.
 
 ## Git Workflow
 
@@ -160,7 +171,7 @@ Each consumer repo should list the *specific* whitepapers / ADRs that bind it (u
 
 If a user request asks for something a binding whitepaper or ADR precludes, surface the conflict before writing code. These aren't permanently fixed — but operational artifacts shouldn't drift ahead of strategy without a deliberate revision step.
 
-<!-- Altimist Baseline v5 — END -->
+<!-- Altimist Baseline v6 — END -->
 
 ## Project
 
