@@ -1,4 +1,4 @@
-<!-- Altimist Baseline v6 — START -->
+<!-- Altimist Baseline v7 — START -->
 
 ## Working Principles
 
@@ -84,6 +84,23 @@ The [Altimist plugin](https://github.com/altimist/altimist-claude-plugin) ships 
 - **Verification gate** — runs the project's typecheck → lint → test before a code-changing turn can finish, and blocks until they pass (`VERIFY_OFF=1` bypasses for a session). Makes **Goal-Driven Execution** a mechanism, not a reminder.
 
 If the plugin isn't installed these skills won't resolve — install it once per machine and restart Claude Code.
+
+## Loop & Autonomy Guardrails
+
+These apply whenever a session runs work in a **loop** — `/loop`, `/goal`, a scheduled routine, or fanning out sub-agents — i.e. any time an *agent*, not a human, decides the next action. A loop is not a cron job: a script runs fixed steps; a loop reads state, picks the next action, checks the result, and decides whether to continue, retry, or stop. Without the guardrails below it isn't a loop — it's a token furnace.
+
+**Never start a loop without all three:**
+
+- **A verifiable "done."** An objective stop target — "tests X pass", "CI green", "reviewer confirms criterion N" — never "until it looks right." A fuzzy goal makes the loop optimise toward a fake target. The spec's acceptance criteria are the goal; the verify gate and `/review` are how it's checked.
+- **A separate checker.** Verification stronger than the agent's own say-so — the verify gate (typecheck→lint→test) and the adversarial `spec-reviewer`. The actor and the checker must not be the same judgement.
+- **Hard breaks.** A max-iteration cap, no-progress detection (stop if N rounds change nothing), and a token/$ budget stated up front. Log spend; review it. Cost is part of the design, not an afterthought.
+
+**Keep the human at the decisions that matter:**
+
+- **Approve, don't trigger.** Removing yourself from the *trigger* is the point; staying at *approval* for anything that spends money or can't be undone is not — provisioning paid resources, production deploys, and outbound external comms always stop for a human (the same gate as "Vercel = Nathan/altimistDEV only" and confirming outward-facing actions).
+- **Start simple, earn autonomy.** A solo loop with good verification beats a swarm for almost everything. Run a loop manually-triggered and monitored until it has proven itself; only then schedule it. Add autonomy when it pays for itself, not before.
+
+Full rationale and the routine catalogue: [`altimist-strategy/research/loop-engineering-2026.md`](https://github.com/altimist/altimist-strategy/blob/main/research/loop-engineering-2026.md).
 
 ## Git Workflow
 
@@ -171,7 +188,7 @@ Each consumer repo should list the *specific* whitepapers / ADRs that bind it (u
 
 If a user request asks for something a binding whitepaper or ADR precludes, surface the conflict before writing code. These aren't permanently fixed — but operational artifacts shouldn't drift ahead of strategy without a deliberate revision step.
 
-<!-- Altimist Baseline v6 — END -->
+<!-- Altimist Baseline v7 — END -->
 
 ## Project
 
