@@ -1,4 +1,4 @@
-<!-- Altimist Baseline v7 — START -->
+<!-- Altimist Baseline v8 — START -->
 
 ## Working Principles
 
@@ -97,7 +97,7 @@ These apply whenever a session runs work in a **loop** — `/loop`, `/goal`, a s
 
 **Keep the human at the decisions that matter:**
 
-- **Approve, don't trigger.** Removing yourself from the *trigger* is the point; staying at *approval* for anything that spends money or can't be undone is not — provisioning paid resources, production deploys, and outbound external comms always stop for a human (the same gate as "Vercel = Nathan/altimistDEV only" and confirming outward-facing actions).
+- **Approve, don't trigger.** Removing yourself from the *trigger* is the point; staying at *approval* for anything that spends money or can't be undone is not — provisioning paid resources, production deploys, and outbound external comms always stop for a human (the same gate as "Vercel = Nathan/altimistDEV only" and confirming outward-facing actions). Here "external comms" means **customer- or public-facing, or irreversible** messages — *not* internal status digests to our own channels (CI/Dependabot-style notifications), which a read-only routine may post unattended.
 - **Start simple, earn autonomy.** A solo loop with good verification beats a swarm for almost everything. Run a loop manually-triggered and monitored until it has proven itself; only then schedule it. Add autonomy when it pays for itself, not before.
 
 Full rationale and the routine catalogue: [`altimist-strategy/research/loop-engineering-2026.md`](https://github.com/altimist/altimist-strategy/blob/main/research/loop-engineering-2026.md).
@@ -188,7 +188,7 @@ Each consumer repo should list the *specific* whitepapers / ADRs that bind it (u
 
 If a user request asks for something a binding whitepaper or ADR precludes, surface the conflict before writing code. These aren't permanently fixed — but operational artifacts shouldn't drift ahead of strategy without a deliberate revision step.
 
-<!-- Altimist Baseline v7 — END -->
+<!-- Altimist Baseline v8 — END -->
 
 ## Project
 
