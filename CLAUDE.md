@@ -1,4 +1,4 @@
-<!-- Altimist Baseline v8 — START -->
+<!-- Altimist Baseline v9 — START -->
 
 ## Working Principles
 
@@ -55,6 +55,17 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+### 5. "Done" Means Wired In and Switched On
+
+Writing the code is not the finish line. A change is complete only when it is reachable and exercised in the real path — not merely present in the repo.
+
+- Re-read the result against the original request: every part of the ask maps to something done — nothing silently dropped, nothing invented.
+- A claim you couldn't verify this session is labelled unverified, not stated as fact.
+- New code is wired in before it's done: referenced, called from a real entry point, and switched on (flag, config, env var) — then observed running, not just compiling. The verification gate and `/review`, where installed, are stronger checks than your own re-read.
+- If activation needs something this environment can't do (a deploy, a secret, prod access), say exactly what remains to turn it on — never imply it's live when it isn't.
+
+The test: could someone act on your "done" without discovering leftover work?
+
 ## Spec-First for Substantial Features
 
 Before implementing a substantial feature, check for an existing spec in `docs/specs/`. If none exists, propose drafting one with the user before writing code.
@@ -76,14 +87,14 @@ Before implementing a substantial feature, check for an existing spec in `docs/s
 
 ## Altimist Claude Code tooling
 
-The [Altimist plugin](https://github.com/altimist/altimist-claude-plugin) ships team skills plus a verification gate. When it's installed (one-time setup: `altimist-claude-config/docs/runbooks/install-plugin.md`), prefer it over hand-rolling:
+The [Altimist plugin](https://github.com/altimist/altimist-claude-plugin) ships team skills plus a verification gate. When it's installed (one-time setup: the [install runbook](https://github.com/altimist/altimist-claude-config/blob/main/docs/runbooks/install-plugin.md)), prefer it over hand-rolling:
 
 - **Spec a feature** → `/create-feature-spec` (interview → user stories, goals, acceptance criteria), then `/implement-spec` for the red→green→refactor loop — the easiest way to satisfy the **Spec-First** rule above.
 - **Second opinion on a change** → `/review` — spec-aware adversarial review; `--codex` / `--both` adds a cross-vendor pass.
 - **Read a PDF / Word doc** → `/doc2md` (see the **Reading Documents** section).
 - **Verification gate** — runs the project's typecheck → lint → test before a code-changing turn can finish, and blocks until they pass (`VERIFY_OFF=1` bypasses for a session). Makes **Goal-Driven Execution** a mechanism, not a reminder.
 
-If the plugin isn't installed these skills won't resolve — install it once per machine and restart Claude Code.
+If the plugin isn't installed these skills won't resolve — install it once per machine via the runbook above and restart Claude Code. Don't improvise install or update commands from memory — the runbook is the source of truth.
 
 ## Loop & Autonomy Guardrails
 
@@ -188,7 +199,7 @@ Each consumer repo should list the *specific* whitepapers / ADRs that bind it (u
 
 If a user request asks for something a binding whitepaper or ADR precludes, surface the conflict before writing code. These aren't permanently fixed — but operational artifacts shouldn't drift ahead of strategy without a deliberate revision step.
 
-<!-- Altimist Baseline v8 — END -->
+<!-- Altimist Baseline v9 — END -->
 
 ## Project
 
