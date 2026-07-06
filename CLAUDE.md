@@ -1,4 +1,4 @@
-<!-- Altimist Baseline v9 — START -->
+<!-- Altimist Baseline v10 — START -->
 
 ## Working Principles
 
@@ -138,6 +138,13 @@ We recommend configuring **GitHub branch protection rules** on each repo to enfo
 - **Verify remote state before claiming it.** Once a PR is opened or work is pushed, its state (open / merged / closed; branch position; deploy status) is unknown until observed — anyone with merge rights may have acted on it. Before saying *"the PR is open"* or *"main hasn't moved"*, run the check (`gh pr view <n>`, `gh pr list`, `git fetch`). Cheap to verify; expensive to be wrong.
 - **Pull latest before pushing.** Upstream may have moved while you were working. Run `git fetch` and rebase or merge the latest target branch into your feature branch before pushing, to avoid landing on a stale base.
 
+## Altimist Design & Branding
+
+For user-facing visual output — web UI, artifacts, dashboards, charts, slides, styled docs — default to the [Altimist Design System](https://github.com/altimist/altimist-design-system): the agent-readable source of truth for the brand. Don't invent colours, fonts, or spacing — take exact values from `tokens/tokens.json` and follow that repo's README for wiring (distribution is copy-in per [ADR-033](https://github.com/altimist/altimist-strategy/blob/main/decisions/ADR-033-distribute-design-system-as-copy-in.md); there is no npm package). This doesn't apply to non-visual work (APIs, CLIs, data pipelines) — brand what a human sees.
+
+- **Respect the project's existing theme.** Introduce or change theming only when that is the task — never as a side effect of an unrelated change (Surgical Changes applies). If a project has no theme and the task is visual, propose the design system rather than ad-hoc styling.
+- **Charts:** use the design system's `dataViz` tokens as the series palette. When a design-focused skill runs (`dataviz`, `artifact-design`, `frontend-design` where installed), apply Altimist tokens from the start — the brand is the default theme, not an afterthought.
+
 ## Documentation
 
 Every material change should leave the project's documentation accurate.
@@ -199,7 +206,7 @@ Each consumer repo should list the *specific* whitepapers / ADRs that bind it (u
 
 If a user request asks for something a binding whitepaper or ADR precludes, surface the conflict before writing code. These aren't permanently fixed — but operational artifacts shouldn't drift ahead of strategy without a deliberate revision step.
 
-<!-- Altimist Baseline v9 — END -->
+<!-- Altimist Baseline v10 — END -->
 
 ## Project
 
