@@ -81,6 +81,18 @@ describe('enforce — anonymous', () => {
     const res = await enforce(anon('GET', '/api/backtests'), cfg);
     expect(res.status).toBe(401);
   });
+
+  it('redirects to the forwarded public host, not the local bind address req.url reflects self-hosted behind a proxy', async () => {
+    // Self-hosted behind a reverse proxy, req.url is http://localhost:<port>
+    // even though the real request came in on the public domain — the proxy
+    // forwards the real host via X-Forwarded-Host.
+    const req = new NextRequest('http://localhost:3000/', {
+      method: 'GET',
+      headers: { 'x-forwarded-host': 'app.example.com', 'x-forwarded-proto': 'https' },
+    });
+    const res = await enforce(req, cfg);
+    expect(res.headers.get('location')).toBe('https://app.example.com/login');
+  });
 });
 
 describe('enforce — visitor authorization', () => {
@@ -104,6 +116,19 @@ describe('enforce — visitor authorization', () => {
     const res = await enforce(await authed('GET', '/chat', 'visitor'), cfg);
     expect(res.status).toBe(307);
     expect(res.headers.get('location')).toMatch(/\/$/);
+  });
+  it('the non-login redirect branch also uses the forwarded public host, not req.url', async () => {
+    const { cookie } = await issueSession(cfg, 'u', 'visitor');
+    const req = new NextRequest('http://localhost:3000/chat', {
+      method: 'GET',
+      headers: {
+        cookie: `${cookie.name}=${cookie.value}`,
+        'x-forwarded-host': 'app.example.com',
+        'x-forwarded-proto': 'https',
+      },
+    });
+    const res = await enforce(req, cfg);
+    expect(res.headers.get('location')).toBe('https://app.example.com/');
   });
 });
 
