@@ -29,8 +29,14 @@ export function randomState(): string {
   return Buffer.from(bytes).toString('base64url');
 }
 
-/** This app's callback URL, derived from the user-facing origin (proxy-aware). */
-export function callbackUrl(req: NextRequest): string {
+/**
+ * This app's user-facing origin (proxy-aware). `req.url` alone isn't safe to
+ * use here: self-hosted behind a reverse proxy, the Next.js process sees its
+ * own local bind address (e.g. `http://localhost:3000`), not the public
+ * host — the proxy forwards the real host via `X-Forwarded-Host`/`Host`, so
+ * those take precedence.
+ */
+export function forwardedOrigin(req: NextRequest): string {
   const proto =
     req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() ??
     new URL(req.url).protocol.replace(':', '');
@@ -38,5 +44,10 @@ export function callbackUrl(req: NextRequest): string {
     req.headers.get('x-forwarded-host')?.split(',')[0]?.trim() ??
     req.headers.get('host') ??
     new URL(req.url).host;
-  return `${proto}://${host}${AID_PATHS.callback}`;
+  return `${proto}://${host}`;
+}
+
+/** This app's callback URL, derived from the user-facing origin (proxy-aware). */
+export function callbackUrl(req: NextRequest): string {
+  return `${forwardedOrigin(req)}${AID_PATHS.callback}`;
 }
