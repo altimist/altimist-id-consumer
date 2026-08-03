@@ -73,25 +73,27 @@ describe('enforce — anonymous', () => {
   });
   it('preserves the originally-requested page as ?next', async () => {
     const res = await enforce(anon('GET', '/live'), cfg);
-    const loc = new URL(res.headers.get('location')!);
-    expect(loc.pathname).toBe('/login');
-    expect(loc.searchParams.get('next')).toBe('/live');
+    expect(res.headers.get('location')).toBe('/login?next=%2Flive');
   });
   it('returns 401 JSON for an anonymous API request', async () => {
     const res = await enforce(anon('GET', '/api/backtests'), cfg);
     expect(res.status).toBe(401);
   });
 
-  it('redirects to the forwarded public host, not the local bind address req.url reflects self-hosted behind a proxy', async () => {
+  it('redirects RELATIVE — no host to get wrong, and X-Forwarded-Host cannot steer it', async () => {
     // Self-hosted behind a reverse proxy, req.url is http://localhost:<port>
-    // even though the real request came in on the public domain — the proxy
-    // forwards the real host via X-Forwarded-Host.
+    // even though the real request came in on the public domain. A relative
+    // Location has no host at all: it's neither wrong (localhost) nor
+    // attacker-steerable via a spoofed X-Forwarded-Host.
     const req = new NextRequest('http://localhost:3000/', {
       method: 'GET',
-      headers: { 'x-forwarded-host': 'app.example.com', 'x-forwarded-proto': 'https' },
+      headers: { 'x-forwarded-host': 'evil.example', 'x-forwarded-proto': 'https' },
     });
     const res = await enforce(req, cfg);
-    expect(res.headers.get('location')).toBe('https://app.example.com/login');
+    const location = res.headers.get('location');
+    expect(location).toBe('/login');
+    expect(location).not.toContain('localhost');
+    expect(location).not.toContain('evil.example');
   });
 });
 
@@ -117,18 +119,20 @@ describe('enforce — visitor authorization', () => {
     expect(res.status).toBe(307);
     expect(res.headers.get('location')).toMatch(/\/$/);
   });
-  it('the non-login redirect branch also uses the forwarded public host, not req.url', async () => {
+  it('the non-login redirect branch is also relative — X-Forwarded-Host cannot steer it', async () => {
     const { cookie } = await issueSession(cfg, 'u', 'visitor');
     const req = new NextRequest('http://localhost:3000/chat', {
       method: 'GET',
       headers: {
         cookie: `${cookie.name}=${cookie.value}`,
-        'x-forwarded-host': 'app.example.com',
+        'x-forwarded-host': 'evil.example',
         'x-forwarded-proto': 'https',
       },
     });
     const res = await enforce(req, cfg);
-    expect(res.headers.get('location')).toBe('https://app.example.com/');
+    const location = res.headers.get('location');
+    expect(location).toBe('/');
+    expect(location).not.toContain('evil.example');
   });
 });
 
@@ -173,8 +177,6 @@ describe('enforce — session paths + fail-closed', () => {
     });
     const res = await enforce(req, cfg);
     expect(res.status).toBe(307);
-    const loc = new URL(res.headers.get('location')!);
-    expect(loc.pathname).toBe('/login');
-    expect(loc.searchParams.get('next')).toBe('/analyse');
+    expect(res.headers.get('location')).toBe('/login?next=%2Fanalyse');
   });
 });

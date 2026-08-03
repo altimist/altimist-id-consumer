@@ -21,7 +21,7 @@ import {
   clientIp,
   randomState,
   callbackUrl,
-  forwardedOrigin,
+  sameOriginRedirect,
 } from './handoff.js';
 
 export type RouteHandler = (req: NextRequest) => Promise<NextResponse>;
@@ -146,23 +146,18 @@ export function createRoutes(deps: ResolvedConfig): AidRoutes {
     const state = req.nextUrl.searchParams.get('state');
     const cookieState = req.cookies.get(STATE_COOKIE_NAME)?.value;
 
-    const origin = forwardedOrigin(req);
-    const loginUrl = new URL(deps.policy.loginPath, origin);
-
     // Fail closed on a missing/mismatched state — an attacker can't read the
     // HttpOnly cookie, so can't forge a matching pair.
     if (!bridgeJwt || !state || !cookieState || state !== cookieState) {
-      loginUrl.searchParams.set('error', 'handoff');
-      return NextResponse.redirect(loginUrl);
+      return sameOriginRedirect(deps.policy.loginPath, { error: 'handoff' });
     }
 
     const out = await verifyAndSignIn(deps, bridgeJwt);
     if (out.kind !== 'ok') {
-      loginUrl.searchParams.set('error', out.kind);
-      return NextResponse.redirect(loginUrl);
+      return sameOriginRedirect(deps.policy.loginPath, { error: out.kind });
     }
 
-    const res = NextResponse.redirect(new URL('/', origin));
+    const res = sameOriginRedirect('/');
     res.cookies.set(out.cookie.name, out.cookie.value, out.cookie.options);
     res.cookies.set(STATE_COOKIE_NAME, '', { path: STATE_COOKIE_PATH, maxAge: 0 });
     return res;

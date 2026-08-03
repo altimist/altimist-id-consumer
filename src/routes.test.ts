@@ -106,22 +106,25 @@ describe('callback — CSRF state', () => {
       new NextRequest('http://localhost/auth/altimist/callback?bridge_jwt=x&state=a'),
     );
     expect(res.status).toBe(307);
-    const loc = new URL(res.headers.get('location')!);
-    expect(loc.pathname).toBe('/login');
-    expect(loc.searchParams.get('error')).toBe('handoff');
+    expect(res.headers.get('location')).toBe('/login?error=handoff');
   });
 
-  it('redirects to the forwarded public host, not the local bind address req.url reflects self-hosted behind a proxy', async () => {
+  it('redirects RELATIVE — no host to get wrong, and X-Forwarded-Host cannot steer it', async () => {
     // Self-hosted behind a reverse proxy, req.url is http://localhost:<port>
-    // even though the real request came in on the public domain — the proxy
-    // forwards the real host via X-Forwarded-Host.
+    // even though the real request came in on the public domain. A relative
+    // Location has no host at all: it's neither wrong (localhost) nor
+    // attacker-steerable via a spoofed X-Forwarded-Host — the browser
+    // resolves it against the real request origin.
     const req = new NextRequest('http://localhost:3000/auth/altimist/callback?bridge_jwt=x&state=a', {
       headers: {
-        'x-forwarded-host': 'app.example.com',
+        'x-forwarded-host': 'evil.example',
         'x-forwarded-proto': 'https',
       },
     });
     const res = await routes.callback.GET(req);
-    expect(res.headers.get('location')).toBe('https://app.example.com/login?error=handoff');
+    const location = res.headers.get('location');
+    expect(location).toBe('/login?error=handoff');
+    expect(location).not.toContain('localhost');
+    expect(location).not.toContain('evil.example');
   });
 });
