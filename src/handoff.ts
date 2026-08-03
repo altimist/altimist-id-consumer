@@ -7,6 +7,7 @@
  * origin can't read the cookie, so can't forge a matching pair. (The popup path
  * validates `state` client-side in the postMessage handler.)
  */
+import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { AID_PATHS } from './paths.js';
 
@@ -30,11 +31,21 @@ export function randomState(): string {
 }
 
 /**
- * This app's user-facing origin (proxy-aware). `req.url` alone isn't safe to
- * use here: self-hosted behind a reverse proxy, the Next.js process sees its
- * own local bind address (e.g. `http://localhost:3000`), not the public
- * host — the proxy forwards the real host via `X-Forwarded-Host`/`Host`, so
- * those take precedence.
+ * This app's user-facing origin (proxy-aware). Needed ONLY for building an
+ * ABSOLUTE cross-origin URL — the altimist.id `redirect_uri`/`return_to`,
+ * which altimist.id validates against a per-app allow-list, closing the
+ * open-redirect risk of trusting `X-Forwarded-Host` here.
+ *
+ * Never use this for a same-origin redirect (login page, post-login
+ * landing, etc.) — use `sameOriginRedirect` instead. Two reasons:
+ *   1. `req.url` alone isn't safe: self-hosted behind a reverse proxy, the
+ *      Next.js process sees its own local bind address (e.g.
+ *      `http://localhost:3000`), not the public host.
+ *   2. `X-Forwarded-Host` is an unvalidated client-controlled header at the
+ *      auth boundary — trusting it for a same-origin redirect is itself an
+ *      open-redirect vector, since nothing here checks it against
+ *      anything. It's safe ONLY because altimist.id independently
+ *      allow-lists the resulting cross-origin URL on its side.
  */
 export function forwardedOrigin(req: NextRequest): string {
   const proto =
@@ -50,4 +61,23 @@ export function forwardedOrigin(req: NextRequest): string {
 /** This app's callback URL, derived from the user-facing origin (proxy-aware). */
 export function callbackUrl(req: NextRequest): string {
   return `${forwardedOrigin(req)}${AID_PATHS.callback}`;
+}
+
+/**
+ * Redirect to a same-origin relative path. All in-app redirects (login page,
+ * post-login landing, role-gated "go elsewhere") are same-origin, so there is
+ * no need to — and must not — build an absolute URL from a host: the browser
+ * resolves a relative `Location` against the real request origin, with no
+ * host to get wrong and no header to trust.
+ */
+export function sameOriginRedirect(
+  path: string,
+  params?: Record<string, string>,
+): NextResponse {
+  let location = path;
+  if (params) {
+    const qs = new URLSearchParams(params).toString();
+    if (qs) location += (path.includes('?') ? '&' : '?') + qs;
+  }
+  return new NextResponse(null, { status: 307, headers: { location } });
 }

@@ -13,7 +13,7 @@ import { evaluate, type Caller, type PolicyDecision } from './policy.js';
 import { getSession, SESSION_COOKIE } from './session.js';
 import { checkApiKey } from './m2m-auth.js';
 import { safeAudit } from './audit.js';
-import { forwardedOrigin } from './handoff.js';
+import { sameOriginRedirect } from './handoff.js';
 import type { ResolvedConfig } from './config.js';
 
 const ANON: Caller = { authenticated: false };
@@ -34,7 +34,7 @@ function toResponse(
     case 'redirect':
       return decision.to === loginPath
         ? loginRedirect(req, loginPath)
-        : NextResponse.redirect(new URL(decision.to, forwardedOrigin(req)));
+        : sameOriginRedirect(decision.to);
     case 'deny':
       if (decision.status === 401) {
         return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
@@ -52,12 +52,9 @@ function toResponse(
  * (skip the root and the login page itself).
  */
 function loginRedirect(req: NextRequest, loginPath: string): NextResponse {
-  const url = new URL(loginPath, forwardedOrigin(req));
   const orig = req.nextUrl.pathname + req.nextUrl.search;
-  if (orig && orig !== '/' && orig !== loginPath) {
-    url.searchParams.set('next', orig);
-  }
-  return NextResponse.redirect(url);
+  const params = orig && orig !== '/' && orig !== loginPath ? { next: orig } : undefined;
+  return sameOriginRedirect(loginPath, params);
 }
 
 /** Fail-closed fallback used when something unexpected throws. */
