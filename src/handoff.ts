@@ -69,6 +69,9 @@ export function callbackUrl(req: NextRequest): string {
  * no need to — and must not — build an absolute URL from a host: the browser
  * resolves a relative `Location` against the real request origin, with no
  * host to get wrong and no header to trust.
+ *
+ * Route-handler use ONLY. In middleware, use `sameOriginMiddlewareRedirect`
+ * instead — a bare relative `Location` crashes Next's middleware adapter.
  */
 export function sameOriginRedirect(
   path: string,
@@ -80,4 +83,29 @@ export function sameOriginRedirect(
     if (qs) location += (path.includes('?') ? '&' : '?') + qs;
   }
   return new NextResponse(null, { status: 307, headers: { location } });
+}
+
+/**
+ * Redirect to a same-origin path, for use in `middleware.ts` (`enforce.ts`)
+ * ONLY. Unlike a route handler, Next's middleware adapter re-parses whatever
+ * ends up in the response's `Location` header via `new URL(location)` — with
+ * no base — before it reaches the browser, so a bare relative path throws
+ * `TypeError: Invalid URL` and crashes the middleware entirely.
+ *
+ * Building the absolute URL from `req.url` (never from `X-Forwarded-Host`)
+ * keeps this safe: the target origin always equals the request's own origin,
+ * so Next's middleware pipeline relativizes it back down for the browser —
+ * same relative-Location result as `sameOriginRedirect`, just satisfying the
+ * adapter's parsing requirement along the way.
+ */
+export function sameOriginMiddlewareRedirect(
+  req: NextRequest,
+  path: string,
+  params?: Record<string, string>,
+): NextResponse {
+  const url = new URL(path, req.url);
+  if (params) {
+    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+  }
+  return NextResponse.redirect(url);
 }

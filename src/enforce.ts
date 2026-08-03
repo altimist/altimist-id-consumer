@@ -13,7 +13,7 @@ import { evaluate, type Caller, type PolicyDecision } from './policy.js';
 import { getSession, SESSION_COOKIE } from './session.js';
 import { checkApiKey } from './m2m-auth.js';
 import { safeAudit } from './audit.js';
-import { sameOriginRedirect } from './handoff.js';
+import { sameOriginMiddlewareRedirect } from './handoff.js';
 import type { ResolvedConfig } from './config.js';
 
 const ANON: Caller = { authenticated: false };
@@ -34,7 +34,7 @@ function toResponse(
     case 'redirect':
       return decision.to === loginPath
         ? loginRedirect(req, loginPath)
-        : sameOriginRedirect(decision.to);
+        : sameOriginMiddlewareRedirect(req, decision.to);
     case 'deny':
       if (decision.status === 401) {
         return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
@@ -54,7 +54,7 @@ function toResponse(
 function loginRedirect(req: NextRequest, loginPath: string): NextResponse {
   const orig = req.nextUrl.pathname + req.nextUrl.search;
   const params = orig && orig !== '/' && orig !== loginPath ? { next: orig } : undefined;
-  return sameOriginRedirect(loginPath, params);
+  return sameOriginMiddlewareRedirect(req, loginPath, params);
 }
 
 /** Fail-closed fallback used when something unexpected throws. */

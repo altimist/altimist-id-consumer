@@ -73,26 +73,30 @@ describe('enforce — anonymous', () => {
   });
   it('preserves the originally-requested page as ?next', async () => {
     const res = await enforce(anon('GET', '/live'), cfg);
-    expect(res.headers.get('location')).toBe('/login?next=%2Flive');
+    expect(res.headers.get('location')).toBe('http://localhost/login?next=%2Flive');
   });
   it('returns 401 JSON for an anonymous API request', async () => {
     const res = await enforce(anon('GET', '/api/backtests'), cfg);
     expect(res.status).toBe(401);
   });
 
-  it('redirects RELATIVE — no host to get wrong, and X-Forwarded-Host cannot steer it', async () => {
-    // Self-hosted behind a reverse proxy, req.url is http://localhost:<port>
-    // even though the real request came in on the public domain. A relative
-    // Location has no host at all: it's neither wrong (localhost) nor
-    // attacker-steerable via a spoofed X-Forwarded-Host.
+  it("redirects from req.url only — X-Forwarded-Host cannot steer it, and the Location is always an absolute URL Next's middleware adapter can re-parse", async () => {
+    // Next's middleware adapter re-parses whatever ends up in the response's
+    // `Location` header via `new URL(location)` — with NO base — before it
+    // reaches the browser; a bare relative Location throws `Invalid URL` and
+    // crashes the middleware outright. Building from req.url (never from
+    // X-Forwarded-Host) keeps this parseable while staying un-steerable: the
+    // origin always matches the request's own, so Next's own pipeline
+    // relativizes it back down for the real browser (untestable at this
+    // unit level — that relativization lives in Next's adapter, not here).
     const req = new NextRequest('http://localhost:3000/', {
       method: 'GET',
       headers: { 'x-forwarded-host': 'evil.example', 'x-forwarded-proto': 'https' },
     });
     const res = await enforce(req, cfg);
     const location = res.headers.get('location');
-    expect(location).toBe('/login');
-    expect(location).not.toContain('localhost');
+    expect(location).toBe('http://localhost:3000/login');
+    expect(() => new URL(location!)).not.toThrow();
     expect(location).not.toContain('evil.example');
   });
 });
@@ -119,7 +123,7 @@ describe('enforce — visitor authorization', () => {
     expect(res.status).toBe(307);
     expect(res.headers.get('location')).toMatch(/\/$/);
   });
-  it('the non-login redirect branch is also relative — X-Forwarded-Host cannot steer it', async () => {
+  it('the non-login redirect branch is also req.url-derived — X-Forwarded-Host cannot steer it', async () => {
     const { cookie } = await issueSession(cfg, 'u', 'visitor');
     const req = new NextRequest('http://localhost:3000/chat', {
       method: 'GET',
@@ -131,7 +135,7 @@ describe('enforce — visitor authorization', () => {
     });
     const res = await enforce(req, cfg);
     const location = res.headers.get('location');
-    expect(location).toBe('/');
+    expect(location).toBe('http://localhost:3000/');
     expect(location).not.toContain('evil.example');
   });
 });
@@ -177,6 +181,6 @@ describe('enforce — session paths + fail-closed', () => {
     });
     const res = await enforce(req, cfg);
     expect(res.status).toBe(307);
-    expect(res.headers.get('location')).toBe('/login?next=%2Fanalyse');
+    expect(res.headers.get('location')).toBe('http://localhost/login?next=%2Fanalyse');
   });
 });
