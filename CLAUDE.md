@@ -1,4 +1,4 @@
-<!-- Altimist Baseline v10 — START -->
+<!-- Altimist Baseline v11 — START -->
 
 ## Working Principles
 
@@ -108,7 +108,7 @@ These apply whenever a session runs work in a **loop** — `/loop`, `/goal`, a s
 
 **Keep the human at the decisions that matter:**
 
-- **Approve, don't trigger.** Removing yourself from the *trigger* is the point; staying at *approval* for anything that spends money or can't be undone is not — provisioning paid resources, production deploys, and outbound external comms always stop for a human (the same gate as "Vercel = Nathan/altimistDEV only" and confirming outward-facing actions). Here "external comms" means **customer- or public-facing, or irreversible** messages — *not* internal status digests to our own channels (CI/Dependabot-style notifications), which a read-only routine may post unattended.
+- **Approve, don't trigger.** Removing yourself from the *trigger* is the point; staying at *approval* for anything that spends money or can't be undone is not — provisioning paid resources, production deploys, and outbound external comms always stop for a human (the same gate as confirming any outward-facing action, and as the human approval step on a Terraform apply). Here "external comms" means **customer- or public-facing, or irreversible** messages — *not* internal status digests to our own channels (CI/Dependabot-style notifications), which a read-only routine may post unattended.
 - **Start simple, earn autonomy.** A solo loop with good verification beats a swarm for almost everything. Run a loop manually-triggered and monitored until it has proven itself; only then schedule it. Add autonomy when it pays for itself, not before.
 
 Full rationale and the routine catalogue: [`altimist-strategy/research/loop-engineering-2026.md`](https://github.com/altimist/altimist-strategy/blob/main/research/loop-engineering-2026.md).
@@ -131,7 +131,7 @@ We recommend configuring **GitHub branch protection rules** on each repo to enfo
 ### Who creates PRs and who merges
 
 - **Non-Vercel projects:** any team member can open PRs and merge. **Self-merge is allowed** after review — the PR is the visible, traceable record. Small teams trade "two pairs of eyes" for velocity; the spec, test suite, and PR diff serve as the quality signal. Add a reviewer when the change is risky or you want a second opinion.
-- **Vercel-deployed projects:** PRs into `staging` and `main` must be **authored AND merged by a Vercel team member** (Nathan or altimistDEV). Vercel checks the PR author to decide whether to deploy — see Review & Preview Workflow. Other contributors push to feature branches; a Vercel team member opens the PR on their behalf.
+- **Vercel-deployed projects:** open and merge your own PRs into `staging` and `main` once checks are green — every Altimist engineer holds a Vercel seat, so no hand-off to a specific person is needed. Vercel still attributes the deploy to the PR *author*, so a PR authored by a bot or an outside contributor won't trigger one — see Review & Preview Workflow.
 
 ### State verification
 
@@ -172,11 +172,13 @@ Don't Read `.pdf` or `.docx` files directly — PDFs cost ~1,500–3,000 tokens 
 
 ## Review & Preview Workflow (Vercel-deployed projects)
 
-Altimist uses a dedicated `staging` branch for pre-production testing on Vercel projects. This exists because Vercel only generates preview URLs for pushes from Vercel team members. Since only **Nathan** and **altimistDEV** hold Vercel seats (deliberate, for cost), per-PR preview URLs are unavailable for most contributors — testing happens on the shared staging deployment instead.
+Altimist uses a dedicated `staging` branch for pre-production testing on Vercel projects — a shared, always-deployable pre-production environment that changes are exercised on before promotion.
+
+**Every Altimist engineer now holds a Vercel seat.** Routing PRs or merges through a specific person is no longer necessary on any repo — self-authoring and self-merging is the norm once checks are green. (Historic note, because older docs and habits still say otherwise: seats were once limited to Nathan and altimistDEV, and PRs had to be authored by one of them for a deployment to trigger. That constraint is gone.)
 
 - Developers commit and push to their own feature branches as normal.
 - **No one pushes directly to `staging` or `main`.** Both are protected.
-- **PRs into `staging` must be authored AND merged by a Vercel team member** (Nathan or altimistDEV) — Vercel checks the PR author, not the merger. If a non-member authors the PR, the deployment won't trigger. The team member opens the PR on the developer's behalf, using their feature branch.
+- **Open and merge your own PRs.** Vercel attributes a deployment to the PR/commit *author*, so the author needs a Vercel seat — which everyone now has. The only case still worth checking is a PR authored by a bot or an outside contributor, where no deployment will trigger.
 - Merging to `staging` deploys to the project's staging subdomain (e.g. `staging.<prod-domain>`).
 - Reviewers exercise the change on the staging URL before approving.
 - When `staging` is validated, a Vercel team member opens a PR from `staging` to `main` and merges.
@@ -194,6 +196,23 @@ Altimist uses a dedicated `staging` branch for pre-production testing on Vercel 
 
 Projects that don't deploy to Vercel (e.g. CLI packages, Databricks workloads, Docker services) may use a simpler flow — see the project's own `CLAUDE.md` for specifics.
 
+## Environment variables and secrets are Terraform-governed
+
+**Never add or edit an environment variable at its destination.** No Vercel dashboard, no `vercel env add`, no GitHub Actions secret set by hand, no Terraform Cloud workspace variable. If this repo's env vars or CI secrets are managed (most Altimist apps are — `mission-control`, `altimist-id`, and every onboarded repo), the only correct path is:
+
+**1Password (`Altimist - IaC` vault, item titled after the repo, field in the `env` section) → declared in [`altimist/altimist-saas-iac`](https://github.com/altimist/altimist-saas-iac) → applied by merging to `main` there.**
+
+Two failure modes to know, because both are silent:
+
+- **Putting a value in 1Password does nothing on its own.** Nothing reads it until it's declared in `altimist-saas-iac` and an apply has run. No error — the variable simply isn't there.
+- **Terraform setting a Vercel variable is not the same as the app having it.** Vercel bakes env in at *build* time, so an existing deployment never picks up a new variable. A real commit rebuilds and re-points the domain; `vercel redeploy` rebuilds but does **not** move the alias.
+
+Apply happens on merge to `main` via a GitHub Action (ADR-026) — **never run `terraform apply` from a laptop**. Rotate secrets in 1Password, never at the destination: value drift is undetectable by design.
+
+**Full walkthrough, including the `env_targets` syntax and the trap table:** `docs/env-secrets-onboarding.md` in `altimist-saas-iac`. Clone it (`~/projects/altimist/altimist-saas-iac`) before changing configuration — a session scoped to this repo cannot see it otherwise, and will otherwise suggest the dashboard.
+
+If you are about to suggest `vercel env add`, stop and read that document first.
+
 ## Source of truth — Altimist strategy
 
 Strategic context for this repo lives in [`altimist/altimist-strategy`](https://github.com/altimist/altimist-strategy):
@@ -206,7 +225,7 @@ Each consumer repo should list the *specific* whitepapers / ADRs that bind it (u
 
 If a user request asks for something a binding whitepaper or ADR precludes, surface the conflict before writing code. These aren't permanently fixed — but operational artifacts shouldn't drift ahead of strategy without a deliberate revision step.
 
-<!-- Altimist Baseline v10 — END -->
+<!-- Altimist Baseline v11 — END -->
 
 ## Project
 
