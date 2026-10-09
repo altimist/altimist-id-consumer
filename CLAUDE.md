@@ -1,4 +1,4 @@
-<!-- Altimist Baseline v11 — START -->
+<!-- Altimist Baseline v13 — START -->
 
 ## Working Principles
 
@@ -92,6 +92,7 @@ The [Altimist plugin](https://github.com/altimist/altimist-claude-plugin) ships 
 - **Spec a feature** → `/create-feature-spec` (interview → user stories, goals, acceptance criteria), then `/implement-spec` for the red→green→refactor loop — the easiest way to satisfy the **Spec-First** rule above.
 - **Second opinion on a change** → `/review` — spec-aware adversarial review; `--codex` / `--both` adds a cross-vendor pass.
 - **Read a PDF / Word doc** → `/doc2md` (see the **Reading Documents** section).
+- **Ideas and the live plan** → `/record-idea` to capture an idea, `/triage-ideas` to fold, park or promote waiting ideas, `/revise-plan` to change the live plan (see **Ideas and the live plan**).
 - **Verification gate** — runs the project's typecheck → lint → test before a code-changing turn can finish, and blocks until they pass (`VERIFY_OFF=1` bypasses for a session). Makes **Goal-Driven Execution** a mechanism, not a reminder.
 
 If the plugin isn't installed these skills won't resolve — install it once per machine via the runbook above and restart Claude Code. Don't improvise install or update commands from memory — the runbook is the source of truth.
@@ -113,25 +114,36 @@ These apply whenever a session runs work in a **loop** — `/loop`, `/goal`, a s
 
 Full rationale and the routine catalogue: [`altimist-strategy/research/loop-engineering-2026.md`](https://github.com/altimist/altimist-strategy/blob/main/research/loop-engineering-2026.md).
 
+## Platform — Cloudflare
+
+**Cloudflare is Altimist's operating platform.** Workers, Pages, R2, D1, KV, Queues, Workflows and Cloudflare DNS are the default runtime for everything we build and ship. When a design needs hosting, storage, a database, a queue, a cron or a scheduled job, reach for the Cloudflare primitive first, and justify anything else explicitly.
+
+**Vercel has been removed from the Altimist tech stack.** Don't add a Vercel deployment, a `vercel.json`, a Vercel environment variable or a Vercel-specific integration to any project. If you are about to suggest `vercel env add`, `vercel deploy`, a Vercel dashboard step, or a Vercel preview URL — stop. The answer is the Cloudflare equivalent.
+
+**Vercel seats still exist for one reason: completing the migration off Vercel.** A seat holder is not a deployment gatekeeper, is not required to author or merge anyone's PR, and confers no special standing in review. Treat any remaining Vercel deployment as legacy to be retired, not as a supported target.
+
+Where a repo's own `CLAUDE.md`, README or workflow still describes a Vercel flow, that repo has **not been migrated yet**. The description is historical, the migration is the work, and the correct move is to note it rather than follow it. Say so plainly rather than quietly deploying to Vercel because the docs said to.
+
 ## Git Workflow
 
 ### Protected branches
 
 - **`main`** is protected on every Altimist repo. Never push directly.
-- **`staging`** is additionally protected on Vercel-deployed projects (see Review & Preview Workflow).
+- **`staging`** is additionally protected on projects that keep a shared pre-production environment (see Review & Preview Workflow).
 - All other branches (feature branches, topic branches, experiments) are unrestricted — any team member can push to them freely.
 
-We recommend configuring **GitHub branch protection rules** on each repo to enforce this mechanically: require PRs into `main` (and `staging` for Vercel projects), block direct pushes, optionally require status checks. The CLAUDE.md rule is the convention; branch protection is the belt-and-braces.
+We recommend configuring **GitHub branch protection rules** on each repo to enforce this mechanically: require PRs into `main` (and `staging` where a project has one), block direct pushes, optionally require status checks. The CLAUDE.md rule is the convention; branch protection is the belt-and-braces.
 
 ### Workflow
 
-- Branch from `main` (or `staging` for Vercel projects, when targeting staging) → commit → push → open PR → review → merge.
+- Branch from `main` (or `staging`, where a project has one and you are targeting it) → commit → push → open PR → review → merge.
 - Before opening a PR, check the repo status and the latest PRs to avoid duplicates. Gathering information (`git status`, `gh pr list`, etc.) never requires confirmation.
 
 ### Who creates PRs and who merges
 
-- **Non-Vercel projects:** any team member can open PRs and merge. **Self-merge is allowed** after review — the PR is the visible, traceable record. Small teams trade "two pairs of eyes" for velocity; the spec, test suite, and PR diff serve as the quality signal. Add a reviewer when the change is risky or you want a second opinion.
-- **Vercel-deployed projects:** open and merge your own PRs into `staging` and `main` once checks are green — every Altimist engineer holds a Vercel seat, so no hand-off to a specific person is needed. Vercel still attributes the deploy to the PR *author*, so a PR authored by a bot or an outside contributor won't trigger one — see Review & Preview Workflow.
+Any team member can open a PR and merge it. **Self-merge is allowed** after review — the PR is the visible, traceable record. Small teams trade "two pairs of eyes" for velocity; the spec, test suite, and PR diff serve as the quality signal. Add a reviewer when the change is risky, when it touches a shared standard, or when you want a second opinion.
+
+There is no per-platform gatekeeper and no hand-off to a named individual. (Historic note, because older docs and habits still say otherwise: Vercel attributed a deployment to the PR *author*, so PRs once had to be authored by one of the two seat holders. That constraint is gone, along with the platform that created it.)
 
 ### State verification
 
@@ -170,18 +182,16 @@ If a needed doc lives in another repo, open a follow-up issue and link it from t
 
 Don't Read `.pdf` or `.docx` files directly — PDFs cost ~1,500–3,000 tokens **per page** (read as page images), and docx isn't natively readable at all. Convert to Markdown first and read/grep the `.md` sidecar (`spec.pdf` → `spec.pdf.md`): run `/doc2md <file>` (PDF → pymupdf4llm, docx → MarkItDown — fixed rules, see the plugin's `docs/specs/F-001-doc2md.md`). With the Altimist plugin (≥ 0.9.0) installed, a hook **auto-redirects `.pdf` reads**; **`.docx` is not auto-redirected** — Claude Code's Read rejects `.docx` as binary before the hook can run, so **always `/doc2md` a docx first**, then read the `.md`. `DOC2MD_OFF=1` opts out, and a Read with an explicit `pages` parameter bypasses it for intentional visual reads (figures, scans).
 
-## Review & Preview Workflow (Vercel-deployed projects)
+## Review & Preview Workflow (projects with a staging environment)
 
-Altimist uses a dedicated `staging` branch for pre-production testing on Vercel projects — a shared, always-deployable pre-production environment that changes are exercised on before promotion.
-
-**Every Altimist engineer now holds a Vercel seat.** Routing PRs or merges through a specific person is no longer necessary on any repo — self-authoring and self-merging is the norm once checks are green. (Historic note, because older docs and habits still say otherwise: seats were once limited to Nathan and altimistDEV, and PRs had to be authored by one of them for a deployment to trigger. That constraint is gone.)
+Some projects keep a dedicated `staging` branch: a shared, always-deployable pre-production environment that a change is exercised on before promotion. It exists because a reviewer should be able to use the change, not just read the diff.
 
 - Developers commit and push to their own feature branches as normal.
 - **No one pushes directly to `staging` or `main`.** Both are protected.
-- **Open and merge your own PRs.** Vercel attributes a deployment to the PR/commit *author*, so the author needs a Vercel seat — which everyone now has. The only case still worth checking is a PR authored by a bot or an outside contributor, where no deployment will trigger.
-- Merging to `staging` deploys to the project's staging subdomain (e.g. `staging.<prod-domain>`).
+- **Open and merge your own PRs** once checks are green.
+- Merging to `staging` deploys to the project's staging host (e.g. `staging.<prod-domain>`, or a separate `.dev` domain).
 - Reviewers exercise the change on the staging URL before approving.
-- When `staging` is validated, a Vercel team member opens a PR from `staging` to `main` and merges.
+- When `staging` is validated, open a PR from `staging` to `main` and merge.
 - Merging to `main` triggers the production deploy.
 
 **Constraint:** `staging` must always be deployable. Never merge a broken feature into `staging` — it's shared, and a broken staging blocks everyone else's testing.
@@ -194,24 +204,23 @@ Altimist uses a dedicated `staging` branch for pre-production testing on Vercel 
 - **Action:** do a one-time `main` → `staging` merge on the `staging` branch, resolve conflicts in favour of `staging`'s prose where it documents current deployed reality, push the merge commit, then proceed with the `staging` → `main` PR.
 - **Trail:** mention "one-time backflow" in the merge commit message so future readers understand the exception isn't routine.
 
-Projects that don't deploy to Vercel (e.g. CLI packages, Databricks workloads, Docker services) may use a simpler flow — see the project's own `CLAUDE.md` for specifics.
+**Not every project has a staging branch, and most don't need one.** Worker-only services, CLI packages, Databricks workloads and Docker services commonly deploy straight from `main` — see the project's own `CLAUDE.md` for specifics.
 
 ## Environment variables and secrets are Terraform-governed
 
-**Never add or edit an environment variable at its destination.** No Vercel dashboard, no `vercel env add`, no GitHub Actions secret set by hand, no Terraform Cloud workspace variable. If this repo's env vars or CI secrets are managed (most Altimist apps are — `mission-control`, `altimist-id`, and every onboarded repo), the only correct path is:
+**Never add or edit an environment variable at its destination.** No Cloudflare dashboard, no GitHub Actions secret set by hand, no Terraform Cloud workspace variable (and no Vercel dashboard on whatever has not yet been migrated). If this repo's env vars or CI secrets are managed (most Altimist apps are — `mission-control`, `altimist-id`, and every onboarded repo), the only correct path is:
 
 **1Password (`Altimist - IaC` vault, item titled after the repo, field in the `env` section) → declared in [`altimist/altimist-saas-iac`](https://github.com/altimist/altimist-saas-iac) → applied by merging to `main` there.**
 
-Two failure modes to know, because both are silent:
+Failure modes to know, because all of them are silent:
 
 - **Putting a value in 1Password does nothing on its own.** Nothing reads it until it's declared in `altimist-saas-iac` and an apply has run. No error — the variable simply isn't there.
-- **Terraform setting a Vercel variable is not the same as the app having it.** Vercel bakes env in at *build* time, so an existing deployment never picks up a new variable. A real commit rebuilds and re-points the domain; `vercel redeploy` rebuilds but does **not** move the alias.
+- **A secret set with `wrangler secret put` is outside IaC.** It works, and it drifts: nothing reconciles it, and nobody else can see what it is. Use it for a Worker that IaC does not yet own, and say so; for an onboarded repo, declare it in `altimist-saas-iac` instead.
+- **Legacy, Vercel only:** Vercel baked env in at *build* time, so an existing deployment never picked up a new variable — a real commit rebuilt and re-pointed the domain, while `vercel redeploy` rebuilt but did **not** move the alias. This trap dies with the migration; it is recorded because half-migrated projects can still hit it.
 
 Apply happens on merge to `main` via a GitHub Action (ADR-026) — **never run `terraform apply` from a laptop**. Rotate secrets in 1Password, never at the destination: value drift is undetectable by design.
 
 **Full walkthrough, including the `env_targets` syntax and the trap table:** `docs/env-secrets-onboarding.md` in `altimist-saas-iac`. Clone it (`~/projects/altimist/altimist-saas-iac`) before changing configuration — a session scoped to this repo cannot see it otherwise, and will otherwise suggest the dashboard.
-
-If you are about to suggest `vercel env add`, stop and read that document first.
 
 ## Source of truth — Altimist strategy
 
@@ -219,13 +228,27 @@ Strategic context for this repo lives in [`altimist/altimist-strategy`](https://
 
 - **Whitepapers** (`whitepapers/`) — canonical theses (e.g. Finternet-Native Identity v1.3). Specs and architecture in this repo must align with the whitepapers relevant to its domain. Divergence must be flagged explicitly with a "Departs from whitepaper" callout or an ADR — never dressed up as derivation.
 - **ADRs** (`decisions/`) — recorded strategic decisions. Treat as binding for the topic they cover.
-- **Themes / epics** (`themes/`, `epics/`) — multi-repo deliveries; align this repo's roadmap with the theme(s) it serves.
+- **Themes** (`themes/`) — multi-repo strategic objectives; align this repo's roadmap with the theme(s) it serves. Epics live in each product repo's `docs/epics/`.
+- **The live plan** (`plan/CURRENT.md`) — what Altimist is executing now. See **Ideas and the live plan** below.
+- **Ideas** (`ideas/`) — ideas on future direction, triaged against the live plan.
 
 Each consumer repo should list the *specific* whitepapers / ADRs that bind it (usually one or two) in its own `CLAUDE.md` Project section — see [altimist-id](https://github.com/altimist/altimist-id/blob/main/CLAUDE.md#source-of-truth--the-altimist-finternet-native-identity-whitepaper) for the pattern.
 
 If a user request asks for something a binding whitepaper or ADR precludes, surface the conflict before writing code. These aren't permanently fixed — but operational artifacts shouldn't drift ahead of strategy without a deliberate revision step.
 
-<!-- Altimist Baseline v11 — END -->
+**Keep a local clone** at `~/projects/altimist/altimist-strategy` (`gh repo clone altimist/altimist-strategy ~/projects/altimist/altimist-strategy` if it's missing). Read strategy files from `origin/main` after a `git fetch` — `git -C <clone> show origin/main:<path>` — not from the working tree, which may be on any branch and any age.
+
+## Ideas and the live plan
+
+Ideas about where Altimist goes next, and the plan being executed now, both live in `altimist-strategy` — not in this repo, not in a personal memory store, not in a chat.
+
+- **Before substantial work**, read `plan/CURRENT.md`. If the request isn't on the current milestone, say so before building — the same way you surface a conflict with a binding ADR. Off-plan work isn't forbidden; it should be a visible choice.
+- **When someone floats an idea** that isn't the task at hand — a feature, a product direction, a process change — run `/record-idea` rather than letting it die in the session or land in a personal memory store. It asks only for what's missing, and an ideas-only PR merges once checks pass.
+- **When ideas are waiting** (`status: new` in `ideas/`) and the user asks what's next, or a week has passed since the last triage, run `/triage-ideas`. It decides nothing alone — each idea is one decision card for the user.
+- **When finished work meets the current milestone's success criteria**, or the user changes scope or a date, run `/revise-plan`.
+- **Folding ideas into the plan** follows the fold-in rule in `ideas/README.md`: only cheap (about a day), on-objective ideas that move no date, add no vendor and need no ADR go straight in. Anything that changes milestone scope or date needs both founders. Never edit `plan/CURRENT.md` by hand — the skills keep the revision log.
+
+<!-- Altimist Baseline v13 — END -->
 
 ## Project
 
