@@ -1,4 +1,4 @@
-<!-- Altimist Baseline v13 — START -->
+<!-- Altimist Baseline v14 — START -->
 
 ## Working Principles
 
@@ -243,12 +243,14 @@ If a user request asks for something a binding whitepaper or ADR precludes, surf
 Ideas about where Altimist goes next, and the plan being executed now, both live in `altimist-strategy` — not in this repo, not in a personal memory store, not in a chat.
 
 - **Before substantial work**, read `plan/CURRENT.md`. If the request isn't on the current milestone, say so before building — the same way you surface a conflict with a binding ADR. Off-plan work isn't forbidden; it should be a visible choice.
+- **Stop and propose — don't build — when work you've decided is needed** is off the critical path in `plan/CURRENT.md`, would take more than about half a day that no tracker row already covers, or is justified by a policy, regulation, contract or legal reading. This applies even when the work feels *required*, and even when you are authorised to proceed on your own recommendation for ordinary questions. Run `/revise-plan` to open a proposal stating what and why, the rule relied on (quoted, with a link), the facts it applies to, the cost, and what happens if we don't. Until both founders approve it, carry on with the critical path. *Work started on 2026-10-02 on an AI reading of a retention policy ran for a week before anyone outside the lane knew — this rule exists so that can't happen silently again.*
+- **A policy-based reason needs a person.** Your reading of a policy, regulation or contract is a hypothesis, not a finding. Quote the text, state the facts you're applying it to, and get the policy's human owner to confirm it applies before any work starts.
 - **When someone floats an idea** that isn't the task at hand — a feature, a product direction, a process change — run `/record-idea` rather than letting it die in the session or land in a personal memory store. It asks only for what's missing, and an ideas-only PR merges once checks pass.
 - **When ideas are waiting** (`status: new` in `ideas/`) and the user asks what's next, or a week has passed since the last triage, run `/triage-ideas`. It decides nothing alone — each idea is one decision card for the user.
 - **When finished work meets the current milestone's success criteria**, or the user changes scope or a date, run `/revise-plan`.
 - **Folding ideas into the plan** follows the fold-in rule in `ideas/README.md`: only cheap (about a day), on-objective ideas that move no date, add no vendor and need no ADR go straight in. Anything that changes milestone scope or date needs both founders. Never edit `plan/CURRENT.md` by hand — the skills keep the revision log.
 
-<!-- Altimist Baseline v13 — END -->
+<!-- Altimist Baseline v14 — END -->
 
 ## Project
 
