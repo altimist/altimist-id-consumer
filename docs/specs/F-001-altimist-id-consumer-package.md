@@ -155,7 +155,7 @@ export interface AidConfig {
   sessionPassword?: string;              // ≥32 chars; usually via configFromEnv(); runtime-validated
   appId?: string;                        // matches an altimist.id AppPolicy.appId; usually via env
   // identity / verification (all defaulted to the altimist.id production values)
-  allowedIssuers?: readonly string[];    // eTLD+1 hosts; default [resolverDomain]
+  allowedIssuers?: readonly string[];    // exact host + one label under it (PL212); default [resolverDomain]
   resolverDomain?: string;               // default 'altimist.com'
   rpId?: string;                         // default 'altimist.id'
   origins?: string[];                    // default ['https://altimist.id']
