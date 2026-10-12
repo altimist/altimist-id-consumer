@@ -199,6 +199,12 @@ describe('verifyAndSignIn — fail-closed', () => {
     expect(m.verifyBridgeJwt).not.toHaveBeenCalled();
   });
 
+  it('a retired <handle>.altimist.com issuer is denied by default (PL212, ADR-073)', async () => {
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt('did:web:nathan.altimist.com'));
+    expect(out).toMatchObject({ kind: 'issuer_not_allowed', host: 'nathan.altimist.com' });
+    expect(m.verifyBridgeJwt).not.toHaveBeenCalled();
+  });
+
   it('a bridge-JWT verification failure denies sign-in', async () => {
     m.verifyBridgeJwt.mockResolvedValue({ ok: false, reason: 'verification-failed' });
     const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
