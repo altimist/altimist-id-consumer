@@ -310,7 +310,7 @@ migrates (mc#336).
 
 - **The core (`.`) imports neither `@prisma/client` nor `react`.** Prisma lives
   only in `./prisma`; UI lives in the design system. Guarded by a purity test.
-- **Never calls altimist.id on the request path** — inherits the
+- **Never calls Altimist ID (`id.altimist.ai`) on the request path** — inherits the
   `@altimist/did-web-client` invariant (verification is local against public DID
   docs; the hosted handoff is a sign-in-time redirect, not a per-request call).
 - **`AidStore` is the only data-layer seam.** The core performs no DB access
