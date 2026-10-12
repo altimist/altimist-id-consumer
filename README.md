@@ -9,7 +9,7 @@ npm install @altimist/altimist-id-consumer @altimist/did-web-client iron-session
 > **Status:** `0.x`, initial development. The API may change until mission-control
 > migrates onto it (mc#336). See [`docs/specs/F-001-altimist-id-consumer-package.md`](./docs/specs/F-001-altimist-id-consumer-package.md).
 
-> **Changed at the PL212 cutover (12/10/2026, [ADR-073](https://github.com/altimist/altimist-strategy/blob/main/decisions/ADR-073-altimist-id-on-altimist-ai.md)), from 0.2.0.** Altimist ID is at `id.altimist.ai`. It is the RP ID, the origin and the handoff host, and `altimist.id` forwards there. DIDs are `did:web:<handle>.altimist.ai`, so the default issuer allowlist is `altimist.ai`, and a `<handle>.altimist.com` issuer is refused. On staging, set the environment variables below to the `staging.altimist.ai` hosts.
+> **Changed at the PL212 cutover (12/10/2026, [ADR-073](https://github.com/altimist/altimist-strategy/blob/main/decisions/ADR-073-altimist-id-on-altimist-ai.md)), from 0.2.0.** Altimist ID is at `id.altimist.ai`. It is the RP ID, the origin and the handoff host, and `altimist.id` forwards there. DIDs are `did:web:<handle>.altimist.ai`, so the default issuer allowlist is `altimist.ai`, and a `<handle>.altimist.com` issuer is refused. An allowlist entry admits its exact host and hosts exactly one label under it: `altimist.ai` admits `nathan.altimist.ai` but not `alice.staging.altimist.ai`. On staging, set the environment variables below to the `staging.altimist.ai` hosts; with `ALTIMIST_RESOLVER_DOMAIN=staging.altimist.ai` the default allowlist is `staging.altimist.ai`, which admits `<handle>.staging.altimist.ai`, so `ALTIMIST_ALLOWED_ISSUERS` can stay unset.
 
 ## What this is
 
@@ -158,7 +158,7 @@ model AuthAuditLog {
 |---|---|
 | `SESSION_PASSWORD` | iron-session sealing key (≥32 chars, **required**) |
 | `ALTIMIST_APP_ID` | matches your Altimist ID `AppPolicy.appId` |
-| `ALTIMIST_ALLOWED_ISSUERS` | comma-separated `did:web` host eTLD+1s (federation; defaults to the resolver domain) |
+| `ALTIMIST_ALLOWED_ISSUERS` | comma-separated `did:web` hosts (federation); each admits its exact host and hosts exactly one label under it. Defaults to the resolver domain (`altimist.ai`; staging `staging.altimist.ai`) |
 | `ALTIMIST_RESOLVER_DOMAIN` | home domain for DIDs (default `altimist.ai`; staging `staging.altimist.ai`) |
 | `ALTIMIST_RP_ID` | RP ID the assertion is bound to (default `id.altimist.ai`; staging `id.staging.altimist.ai`) |
 | `ALTIMIST_ORIGIN` | comma-separated origins the assertion may come from (default `https://id.altimist.ai`; staging `https://id.staging.altimist.ai`) |
