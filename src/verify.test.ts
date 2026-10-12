@@ -200,6 +200,8 @@ describe('verifyAndSignIn — fail-closed', () => {
   });
 
   it('a retired <handle>.altimist.com issuer is denied by default (PL212, ADR-073)', async () => {
+    // No allowedIssuers: the package default (from resolverDomain) decides.
+    ({ store, cfg } = setup({ allowedIssuers: undefined }));
     const out = await verifyAndSignIn(cfg, makeBridgeJwt('did:web:nathan.altimist.com'));
     expect(out).toMatchObject({ kind: 'issuer_not_allowed', host: 'nathan.altimist.com' });
     expect(m.verifyBridgeJwt).not.toHaveBeenCalled();
