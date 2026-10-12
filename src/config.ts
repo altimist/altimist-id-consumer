@@ -34,7 +34,8 @@ export interface AidConfig {
 
   // identity / verification (defaulted to Altimist ID production values on
   // id.altimist.ai since the PL212 cutover, ADR-073)
-  /** `did:web` host eTLD+1s this consumer trusts. Default `[resolverDomain]`. */
+  /** `did:web` hosts this consumer trusts: each entry admits its exact host and hosts
+   *  exactly one label under it (PL212). Default `[resolverDomain]`. */
   allowedIssuers?: readonly string[];
   /** Home domain for DID resolution + role policy. Default `altimist.ai`
    *  (`altimist.com` before PL212). Staging: `staging.altimist.ai`. */
@@ -111,7 +112,7 @@ export function resolveConfig(config: AidConfig): ResolvedConfig {
   const allowedIssuers =
     config.allowedIssuers && config.allowedIssuers.length > 0
       ? config.allowedIssuers.map((s) => s.trim().toLowerCase()).filter(Boolean)
-      : [resolverDomain];
+      : [resolverDomain.toLowerCase()];
   const altimistIdBaseUrl = (config.altimistIdBaseUrl ?? 'https://id.altimist.ai')
     .trim()
     .replace(/\/$/, '');
