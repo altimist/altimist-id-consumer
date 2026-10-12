@@ -207,6 +207,36 @@ describe('verifyAndSignIn — fail-closed', () => {
     expect(m.verifyBridgeJwt).not.toHaveBeenCalled();
   });
 
+  // BR389 (BPM105), same rule as P5: an allowlist entry admits the exact host and
+  // hosts exactly ONE label under it.
+  it('staging: resolverDomain staging.altimist.ai admits alice.staging.altimist.ai by default (BR1 M1)', async () => {
+    ({ store, cfg } = setup({ allowedIssuers: undefined, resolverDomain: 'staging.altimist.ai' }));
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt('did:web:alice.staging.altimist.ai'));
+    expect(out.kind).not.toBe('issuer_not_allowed');
+    expect(m.verifyBridgeJwt).toHaveBeenCalledTimes(1);
+  });
+
+  it('the production default refuses a staging host before any bridge verification (BR1 m1)', async () => {
+    ({ store, cfg } = setup({ allowedIssuers: undefined }));
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt('did:web:alice.staging.altimist.ai'));
+    expect(out).toMatchObject({ kind: 'issuer_not_allowed', host: 'alice.staging.altimist.ai' });
+    expect(m.verifyBridgeJwt).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['did:web:altimist.ai', ['altimist.ai'], true],
+    ['did:web:nathan.altimist.ai', ['altimist.ai'], true],
+    ['did:web:a.b.altimist.ai', ['altimist.ai'], false],
+    ['did:web:patrickjv.com', ['patrickjv.com'], true],
+    ['did:web:x.y.patrickjv.com', ['patrickjv.com'], false],
+    ['did:web:evilaltimist.ai', ['altimist.ai'], false],
+  ])('%s with allowlist %j: allowed %s (exact host or one label under it)', async (iss, allowedIssuers, ok) => {
+    ({ store, cfg } = setup({ allowedIssuers }));
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(iss));
+    expect(out.kind === 'issuer_not_allowed').toBe(!ok);
+    expect(m.verifyBridgeJwt).toHaveBeenCalledTimes(ok ? 1 : 0);
+  });
+
   it('a bridge-JWT verification failure denies sign-in', async () => {
     m.verifyBridgeJwt.mockResolvedValue({ ok: false, reason: 'verification-failed' });
     const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
