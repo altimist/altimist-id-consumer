@@ -26,22 +26,26 @@ export interface AidConfig {
    */
   sessionPassword?: string;
   /**
-   * Consumer-app identifier; must match an `AppPolicy.appId` on altimist.id.
+   * Consumer-app identifier; must match an `AppPolicy.appId` on Altimist ID.
    * Optional at the type level for the same reason as `sessionPassword` (usually
    * from `ALTIMIST_APP_ID` via `configFromEnv()`); validated at startup.
    */
   appId?: string;
 
-  // identity / verification (defaulted to altimist.id production values)
+  // identity / verification (defaulted to Altimist ID production values on
+  // id.altimist.ai since the PL212 cutover, ADR-073)
   /** `did:web` host eTLD+1s this consumer trusts. Default `[resolverDomain]`. */
   allowedIssuers?: readonly string[];
-  /** Home domain for DID resolution + role policy. Default `altimist.com`. */
+  /** Home domain for DID resolution + role policy. Default `altimist.ai`
+   *  (`altimist.com` before PL212). Staging: `staging.altimist.ai`. */
   resolverDomain?: string;
-  /** RP-ID the bridge assertion is bound to. Default `altimist.id`. */
+  /** RP-ID the bridge assertion is bound to. Default `id.altimist.ai`
+   *  (`altimist.id` before PL212). Staging: `id.staging.altimist.ai`. */
   rpId?: string;
-  /** Origins the bridge assertion may have come from. Default `['https://altimist.id']`. */
+  /** Origins the bridge assertion may have come from. Default `['https://id.altimist.ai']`. */
   origins?: string[];
-  /** altimist.id origin (hosted handoff + release endpoint). Default `https://altimist.id`. */
+  /** Altimist ID origin (hosted handoff + release endpoint). Default
+   *  `https://id.altimist.ai`. Staging: `https://id.staging.altimist.ai`. */
   altimistIdBaseUrl?: string;
   /** Full VC-release endpoint. Default `${altimistIdBaseUrl}/api/release/vcs`. */
   releaseEndpoint?: string;
@@ -103,12 +107,12 @@ export function resolveConfig(config: AidConfig): ResolvedConfig {
     throw new Error('AidConfig.appId is required');
   }
 
-  const resolverDomain = (config.resolverDomain ?? 'altimist.com').trim();
+  const resolverDomain = (config.resolverDomain ?? 'altimist.ai').trim();
   const allowedIssuers =
     config.allowedIssuers && config.allowedIssuers.length > 0
       ? config.allowedIssuers.map((s) => s.trim().toLowerCase()).filter(Boolean)
       : [resolverDomain];
-  const altimistIdBaseUrl = (config.altimistIdBaseUrl ?? 'https://altimist.id')
+  const altimistIdBaseUrl = (config.altimistIdBaseUrl ?? 'https://id.altimist.ai')
     .trim()
     .replace(/\/$/, '');
 
@@ -127,11 +131,11 @@ export function resolveConfig(config: AidConfig): ResolvedConfig {
     sessionPassword: config.sessionPassword,
     appId: config.appId,
     allowedIssuers,
-    rpId: (config.rpId ?? 'altimist.id').trim(),
+    rpId: (config.rpId ?? 'id.altimist.ai').trim(),
     origins:
       config.origins && config.origins.length > 0
         ? config.origins
-        : ['https://altimist.id'],
+        : ['https://id.altimist.ai'],
     altimistIdBaseUrl,
     releaseEndpoint: config.releaseEndpoint ?? `${altimistIdBaseUrl}/api/release/vcs`,
     staffTtlSeconds: config.staffTtlSeconds ?? 7 * DAY,

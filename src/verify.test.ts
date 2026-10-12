@@ -43,7 +43,7 @@ function makeBridgeJwt(iss: string): string {
   return `${b64url(header)}.${b64url(payload)}.${b64url({ sig: 'x' })}`;
 }
 
-const ALT_ISS = 'did:web:nathan.altimist.com';
+const ALT_ISS = 'did:web:nathan.altimist.ai';
 const FED_ISS = 'did:web:patrickjv.com';
 
 let store: InMemoryStore;
@@ -93,7 +93,7 @@ describe('verifyAndSignIn — staff', () => {
   });
 
   it('federated staff identity signs in when its eTLD+1 is allowlisted', async () => {
-    ({ store, cfg } = setup({ allowedIssuers: ['altimist.com', 'patrickjv.com'] }));
+    ({ store, cfg } = setup({ allowedIssuers: ['altimist.ai', 'patrickjv.com'] }));
     m.verifyBridgeJwt.mockResolvedValue({ ok: true, handle: 'patrickjv', kid: 'k1', jti: 'jti-1', iat: 0, exp: 0 });
     m.releaseVcs.mockResolvedValue({ ok: true, vcs: ['vc-jwt'] });
     m.verifyMembershipVC.mockResolvedValue({
@@ -212,7 +212,7 @@ describe('verifyAndSignIn — fail-closed', () => {
     expect(store.users.size).toBe(0);
   });
 
-  it('a release failure fails the sign-in (altimist.id unreachable)', async () => {
+  it('a release failure fails the sign-in (Altimist ID unreachable)', async () => {
     m.releaseVcs.mockResolvedValue({ ok: false, reason: 'network_error', detail: 'ECONNREFUSED' });
     const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
     expect(out).toMatchObject({ kind: 'release_unavailable' });
@@ -226,9 +226,9 @@ describe('verifyAndSignIn — fail-closed', () => {
   });
 
   it('surfaces consent_required from VC release with its consentUrl', async () => {
-    m.releaseVcs.mockResolvedValue({ ok: false, reason: 'consent_required', consentUrl: 'https://altimist.id/consent/abc' });
+    m.releaseVcs.mockResolvedValue({ ok: false, reason: 'consent_required', consentUrl: 'https://id.altimist.ai/consent/abc' });
     const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
-    expect(out).toMatchObject({ kind: 'consent_required', consentUrl: 'https://altimist.id/consent/abc' });
+    expect(out).toMatchObject({ kind: 'consent_required', consentUrl: 'https://id.altimist.ai/consent/abc' });
   });
 
   it('policy_denied from release means visitor (no provable staff), not refusal', async () => {

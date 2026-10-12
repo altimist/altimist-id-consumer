@@ -193,7 +193,7 @@ export function setup(overrides?: Partial<AidConfig>): TestContext {
     store,
     sessionPassword: TEST_SESSION_PASSWORD,
     appId: 'test-app',
-    allowedIssuers: ['altimist.com'],
+    allowedIssuers: ['altimist.ai'],
     policy: TEST_POLICY,
     ...overrides,
   });
