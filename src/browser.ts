@@ -32,7 +32,8 @@ function initErrorMessage(error: string | undefined): string {
   return 'Sign-in failed to start. Try again.';
 }
 
-function verifyErrorMessage(error: string | undefined): string {
+/** @internal Exported for its test only. */
+export function verifyErrorMessage(error: string | undefined): string {
   switch (error) {
     case 'invalid_jwt':
       return 'Sign-in could not be verified. Try again.';

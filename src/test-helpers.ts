@@ -23,7 +23,7 @@ export const TEST_LIST_KEY: JsonWebKey = { kty: 'OKP', crv: 'Ed25519', x: TEST_L
 export const TEST_DEADKEYS_URL = 'https://altimist.com/.well-known/signed-key-list.json';
 
 /**
- * A dead-key list in F-040 D-10's shape, signed with Ed25519 over the JCS of the four
+ * A dead-key list in F-040 rev 15 D-6's shape, signed with Ed25519 over the JCS of the four
  * fields. Defaults: signed by the pinned test key, issued now, valid for 300 s, seq 1.
  */
 export async function signedKeyList(

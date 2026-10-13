@@ -53,8 +53,10 @@ export interface AidConfig {
   releaseEndpoint?: string;
 
   /**
-   * Resolver C (PL263, F-040 D-10): the signed dead-key list. Sign-in fetches it from `url`
-   * and refuses unless it verifies against one of `listKeys` (Ed25519 JWKs, F-040 D-9).
+   * Resolver C (PL263, F-040 rev 15 D-6): the signed dead-key list. Sign-in fetches it from `url`
+   * and refuses unless it verifies against one of `listKeys` (Ed25519 JWKs). An interim departure
+   * from F-040 rev 15 D-4, which pins the trust anchor in did-web-client: until it does, the
+   * deployment's config sets it (NH219 m4).
    * Required, with no default: the deployment sets both. `resolveConfig` throws without them.
    */
   deadKeys?: { url: string; listKeys: readonly JsonWebKey[] };
@@ -96,7 +98,7 @@ export interface ResolvedConfig {
   releaseEndpoint: string;
   deadKeysUrl: string;
   deadKeysListKeys: readonly JsonWebKey[];
-  /** The last list `seq` this config accepted; in memory, per config (F-040 D-10). */
+  /** The last list `seq` this config accepted; in memory, per config (F-040 rev 15 D-6). */
   deadKeysSeen: SeqMemory;
   staffTtlSeconds: number;
   visitorTtlSeconds: number;

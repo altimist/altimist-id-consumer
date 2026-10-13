@@ -100,10 +100,10 @@ export async function verifyAndSignIn(
   const handle = verified.handle;
   const subjectDid = iss; // canonical DID the VC subject must match
 
-  // 2b) Resolver C (PL263, F-040 D-10): the bridge key must not be on the signed dead-key
-  //     list. Sign-in is consequence-bearing, so the list is used with the 'settlement'
-  //     intent only: any failure refuses, and a list that did not verify is never read as
-  //     an empty one (F-040 AC24).
+  // 2b) Resolver C (PL263, F-040 rev 15 D-6): the bridge key must not be on the signed
+  //     dead-key list. Sign-in is consequence-bearing, so the list is used with the
+  //     'settlement' intent only: any failure refuses, and a list that did not verify is
+  //     never read as an empty one (F-040 rev 15 AC6, rev 14 AC24).
   const decision = decideKeyListUse(
     await verifySignedKeyList(await fetchKeyList(deps.deadKeysUrl), {
       listKeys: deps.deadKeysListKeys,
@@ -120,6 +120,9 @@ export async function verifyAndSignIn(
     });
     return { kind: 'key_list_unverified', reason: decision.reason };
   }
+  // The contract on both sides is a bare kid: `verified.kid` is the fragment of the method
+  // that verified the signature (not the header's hint), and the list holds bare credential
+  // IDs (D-6: DeadKey.kid = Device.kid). A full DID URL on the list would not match.
   if (decision.keys.includes(verified.kid)) {
     await safeAudit(deps.store, 'altimist.signin.refused', 'fail', {
       reason: 'key_revoked',
@@ -160,13 +163,20 @@ export async function verifyAndSignIn(
   return finishSignIn(deps, subjectDid, handle, role);
 }
 
-/** The list body, or `null` (verifySignedKeyList's "missing") on any fetch failure or non-2xx. */
+/** How long sign-in waits for the list (headers and body) before refusing it as `missing`. */
+const KEY_LIST_TIMEOUT_MS = 5_000;
+
+/** The list body, or `null` (verifySignedKeyList's "missing") on any fetch failure, non-2xx or timeout. */
 async function fetchKeyList(url: string): Promise<string | null> {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), KEY_LIST_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { cache: 'no-store' });
+    const res = await fetch(url, { cache: 'no-store', signal: abort.signal });
     return res.ok ? await res.text() : null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

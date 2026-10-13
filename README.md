@@ -157,8 +157,8 @@ model AuthAuditLog {
 | `SESSION_PASSWORD` | iron-session sealing key (≥32 chars, **required**) |
 | `ALTIMIST_APP_ID` | matches your altimist.id `AppPolicy.appId` |
 | `ALTIMIST_ALLOWED_ISSUERS` | comma-separated `did:web` host eTLD+1s (federation; defaults to `altimist.com`) |
-| `SIGNED_KEY_LIST_URL` | https URL of Resolver D's signed key list (F-040 D-10; **required**, no default). Production `https://altimist.com/.well-known/signed-key-list.json`; staging `https://altimist.dev/.well-known/signed-key-list.json` |
-| `SIGNED_KEY_LIST_PUBLIC_JWKS` | the pinned list keys, a JSON array of public JWKs, each exactly `{"kty":"OKP","crv":"Ed25519","x":"…"}` (F-040 D-9; **required**, no default; any other member, `d` included, refuses to start) |
+| `SIGNED_KEY_LIST_URL` | https URL of Resolver D's signed key list (F-040 rev 15 D-6; **required**, no default). Production `https://altimist.com/.well-known/signed-key-list.json`; staging `https://altimist.dev/.well-known/signed-key-list.json` |
+| `SIGNED_KEY_LIST_PUBLIC_JWKS` | the pinned list keys, a JSON array of public JWKs, each exactly `{"kty":"OKP","crv":"Ed25519","x":"…"}` (**required**, no default; an interim departure from F-040 rev 15 D-4, which pins the trust anchor in `@altimist/did-web-client`: until it does, whoever sets this sets the revocation trust root; any other member, `d` included, refuses to start) |
 | `API_KEY_HASH`, `API_KEY_HASH_SALT` | optional M2M X-API-Key gate |
 
 Every sign-in fetches the dead-key list and verifies it against the pinned list

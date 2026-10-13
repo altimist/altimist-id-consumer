@@ -307,10 +307,10 @@ describe('verifyAndSignIn — audit', () => {
   });
 });
 
-// Resolver C (PL263, F-040 D-10): before sign-in completes, the consumer fetches the signed
+// Resolver C (PL263, F-040 rev 15 D-6): before sign-in completes, the consumer fetches the signed
 // dead-key list from config, verifies it with did-web-client's verifySignedKeyList, and uses it
 // only through decideKeyListUse(check, 'settlement'). Any failure refuses the sign-in; a key on
-// the list is revoked. AC24 (PL263 cites it as AC6): never project from an empty set.
+// the list is revoked. F-040 rev 15 AC6 (rev 14 AC24): never project from an empty set.
 describe('verifyAndSignIn — the signed dead-key list (Resolver C)', () => {
   const refusedWith = (reason: string) =>
     expect(store.audits).toContainEqual(
@@ -364,7 +364,7 @@ describe('verifyAndSignIn — the signed dead-key list (Resolver C)', () => {
   });
 
   // Each failure refuses, although the bridge key (k1) is on none of these lists: a caller that
-  // treated a failed list as an empty one would sign every one of these in (AC24).
+  // treated a failed list as an empty one would sign every one of these in (AC6).
   it.each([
     ['missing: the list URL answers 404', 'missing', async () => serveList('not found', 404)],
     ['missing: the list URL answers 503', 'missing', async () => serveList('', 503)],
