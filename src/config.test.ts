@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { resolveConfig, configFromEnv } from './config.js';
-import { inMemoryStore, TEST_SESSION_PASSWORD } from './test-helpers.js';
+import { inMemoryStore, TEST_SESSION_PASSWORD, TEST_DEADKEYS_URL, TEST_LIST_KEY } from './test-helpers.js';
 
 const base = () => ({
   store: inMemoryStore(),
   sessionPassword: TEST_SESSION_PASSWORD,
   appId: 'my-app',
+  deadKeys: { url: TEST_DEADKEYS_URL, listKeys: [TEST_LIST_KEY] },
 });
 
 describe('resolveConfig — required fields', () => {
@@ -17,6 +18,29 @@ describe('resolveConfig — required fields', () => {
   });
   it('throws without an appId', () => {
     expect(() => resolveConfig({ ...base(), appId: '' })).toThrow(/appId/);
+  });
+
+  // Resolver C (PL263): the dead-key list URL and the pinned list keys have no default.
+  it('throws without the dead-key list config', () => {
+    expect(() => resolveConfig({ ...base(), deadKeys: undefined })).toThrow(/deadKeys/);
+  });
+  it('throws without a dead-key list URL, or with one that is not https', () => {
+    expect(() => resolveConfig({ ...base(), deadKeys: { url: '', listKeys: [TEST_LIST_KEY] } })).toThrow(/deadKeys\.url/);
+    expect(() =>
+      resolveConfig({ ...base(), deadKeys: { url: 'http://id.altimist.ai/deadkeys', listKeys: [TEST_LIST_KEY] } }),
+    ).toThrow(/deadKeys\.url/);
+    expect(() => resolveConfig({ ...base(), deadKeys: { url: 'not a url', listKeys: [TEST_LIST_KEY] } })).toThrow(/deadKeys\.url/);
+  });
+  it('throws without at least one pinned list key', () => {
+    expect(() => resolveConfig({ ...base(), deadKeys: { url: TEST_DEADKEYS_URL, listKeys: [] } })).toThrow(/deadKeys\.listKeys/);
+  });
+  it('carries the list config through, with its own seq memory per resolved config', () => {
+    const a = resolveConfig(base());
+    const b = resolveConfig(base());
+    expect(a.deadKeysUrl).toBe(TEST_DEADKEYS_URL);
+    expect(a.deadKeysListKeys).toEqual([TEST_LIST_KEY]);
+    expect(a.deadKeysSeen).toEqual({});
+    expect(a.deadKeysSeen).not.toBe(b.deadKeysSeen);
   });
 });
 
@@ -89,6 +113,26 @@ describe('configFromEnv', () => {
     expect(c.appId).toBe('env-app');
     expect(c.allowedIssuers).toEqual(['altimist.com', 'patrickjv.com']);
     expect(c.m2m).toEqual({ apiKeyHash: 'hash', apiKeyHashSalt: 'salt' });
+  });
+
+  it('reads the dead-key list URL and the pinned list keys (a JSON array of JWKs)', () => {
+    process.env.ALTIMIST_DEADKEYS_URL = TEST_DEADKEYS_URL;
+    process.env.ALTIMIST_DEADKEYS_LIST_KEYS = JSON.stringify([TEST_LIST_KEY]);
+    expect(configFromEnv().deadKeys).toEqual({ url: TEST_DEADKEYS_URL, listKeys: [TEST_LIST_KEY] });
+  });
+
+  it('leaves deadKeys unset unless both are set (resolveConfig then refuses to start)', () => {
+    process.env.ALTIMIST_DEADKEYS_URL = TEST_DEADKEYS_URL;
+    delete process.env.ALTIMIST_DEADKEYS_LIST_KEYS;
+    expect('deadKeys' in configFromEnv()).toBe(false);
+  });
+
+  it('throws on list keys that are not a JSON array', () => {
+    process.env.ALTIMIST_DEADKEYS_URL = TEST_DEADKEYS_URL;
+    for (const bad of ['not json', '{"kty":"OKP"}']) {
+      process.env.ALTIMIST_DEADKEYS_LIST_KEYS = bad;
+      expect(() => configFromEnv()).toThrow(/ALTIMIST_DEADKEYS_LIST_KEYS/);
+    }
   });
 
   it('omits keys that are unset (so resolveConfig defaults apply)', () => {

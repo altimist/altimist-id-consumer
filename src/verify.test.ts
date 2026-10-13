@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock only the I/O boundary of the AID client; keep the pure helpers
 // (peekBridgeJwt, parseDid, isIssuerAllowed) real so the issuer-allowlist and
@@ -23,7 +23,14 @@ import {
   fetchTeamIssuer,
 } from '@altimist/did-web-client';
 import { verifyAndSignIn } from './verify.js';
-import { setup, inMemoryStore, type InMemoryStore } from './test-helpers.js';
+import {
+  setup,
+  inMemoryStore,
+  signedKeyList,
+  TEST_DEADKEYS_URL,
+  UNPINNED_LIST_PRIVATE,
+  type InMemoryStore,
+} from './test-helpers.js';
 import type { ResolvedConfig } from './config.js';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -49,13 +56,26 @@ const FED_ISS = 'did:web:patrickjv.com';
 let store: InMemoryStore;
 let cfg: ResolvedConfig;
 
-beforeEach(() => {
+let fetchMock: Mock;
+/** Serve `body` as the dead-key list (status 200), or answer with `status` and no list. */
+function serveList(body: string, status = 200) {
+  fetchMock.mockResolvedValue(new Response(body, { status }));
+}
+
+beforeEach(async () => {
   vi.clearAllMocks();
   ({ store, cfg } = setup());
+  fetchMock = vi.fn();
+  vi.stubGlobal('fetch', fetchMock);
+  serveList(await signedKeyList(['dead-1']));
 
   m.verifyBridgeJwt.mockResolvedValue({ ok: true, handle: 'nathan', kid: 'k1', jti: 'jti-1', iat: 0, exp: 0 });
   m.fetchTeamIssuer.mockResolvedValue({ team: 'altimist', jwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' } });
   m.releaseVcs.mockResolvedValue({ ok: true, vcs: [] });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 function userByDid(did: string) {
@@ -283,5 +303,99 @@ describe('verifyAndSignIn — audit', () => {
     expect(store.audits).toContainEqual(
       expect.objectContaining({ event: 'altimist.signin.refused', outcome: 'fail' }),
     );
+  });
+});
+
+// Resolver C (PL263, F-040 D-10): before sign-in completes, the consumer fetches the signed
+// dead-key list from config, verifies it with did-web-client's verifySignedKeyList, and uses it
+// only through decideKeyListUse(check, 'settlement'). Any failure refuses the sign-in; a key on
+// the list is revoked. AC24 (PL263 cites it as AC6): never project from an empty set.
+describe('verifyAndSignIn — the signed dead-key list (Resolver C)', () => {
+  const refusedWith = (reason: string) =>
+    expect(store.audits).toContainEqual(
+      expect.objectContaining({
+        event: 'altimist.signin.refused',
+        outcome: 'fail',
+        metadata: expect.objectContaining({ reason: 'key_list_unverified', listFailure: reason }),
+      }),
+    );
+
+  it('fetches the list from the configured URL and signs in when the bridge key is not on it', async () => {
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    expect(out).toMatchObject({ kind: 'ok', handle: 'nathan' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(TEST_DEADKEYS_URL);
+  });
+
+  it('a verified list with no keys on it is a real answer: sign-in proceeds', async () => {
+    serveList(await signedKeyList([]));
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    expect(out).toMatchObject({ kind: 'ok' });
+  });
+
+  it('refuses a bridge key that is on the verified list, before any VC release', async () => {
+    serveList(await signedKeyList(['dead-1', 'k1']));
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    expect(out).toMatchObject({ kind: 'invalid_jwt', reason: 'key-revoked' });
+    expect(store.users.size).toBe(0);
+    expect(store.sessions.size).toBe(0);
+    expect(m.releaseVcs).not.toHaveBeenCalled();
+    expect(store.audits).toContainEqual(
+      expect.objectContaining({
+        event: 'altimist.signin.refused',
+        metadata: expect.objectContaining({ reason: 'key_revoked', kid: 'k1' }),
+      }),
+    );
+  });
+
+  // Each failure refuses, although the bridge key (k1) is on none of these lists: a caller that
+  // treated a failed list as an empty one would sign every one of these in (AC24).
+  it.each([
+    ['missing: the list URL answers 404', 'missing', async () => serveList('not found', 404)],
+    ['missing: the list URL answers 503', 'missing', async () => serveList('', 503)],
+    ['missing: the body is empty', 'missing', async () => serveList('')],
+    ['missing: the fetch throws', 'missing', async () => fetchMock.mockRejectedValue(new TypeError('fetch failed'))],
+    ['malformed: not a list', 'malformed', async () => serveList('{"keys":"k2"}')],
+    ['signature: signed by a key nobody pinned', 'signature', async () =>
+      serveList(await signedKeyList(['dead-1'], { signWith: UNPINNED_LIST_PRIVATE }))],
+    ['signature: a dead key struck off after signing', 'signature', async () => {
+      const l = JSON.parse(await signedKeyList(['dead-1']));
+      serveList(JSON.stringify({ ...l, keys: [] }));
+    }],
+    ['expired: valid_until has passed', 'expired', async () =>
+      serveList(await signedKeyList(['dead-1'], { issuedAt: Date.now() - 600_000 }))],
+  ])('%s: refused as key_list_unverified, nothing projected', async (_name, reason, arrange) => {
+    await arrange();
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    expect(out).toEqual({ kind: 'key_list_unverified', reason });
+    expect(store.users.size).toBe(0);
+    expect(store.sessions.size).toBe(0);
+    expect(m.releaseVcs).not.toHaveBeenCalled();
+    refusedWith(reason);
+  });
+
+  it('refuses a list whose seq is below one this config already accepted (replay)', async () => {
+    serveList(await signedKeyList(['dead-1'], { seq: 7 }));
+    expect(await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS))).toMatchObject({ kind: 'ok' });
+
+    serveList(await signedKeyList([], { seq: 6 }));
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    expect(out).toEqual({ kind: 'key_list_unverified', reason: 'seq' });
+    refusedWith('seq');
+  });
+
+  it('keeps the seq high-water per config: a fresh config starts with none', async () => {
+    serveList(await signedKeyList([], { seq: 7 }));
+    await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    ({ store, cfg } = setup());
+    serveList(await signedKeyList([], { seq: 6 }));
+    expect(await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS))).toMatchObject({ kind: 'ok' });
+  });
+
+  it('does not fetch the list for a token refused earlier (issuer, bridge)', async () => {
+    await verifyAndSignIn(cfg, makeBridgeJwt('did:web:evil.com'));
+    m.verifyBridgeJwt.mockResolvedValue({ ok: false, reason: 'verification-failed' });
+    await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
