@@ -33,7 +33,7 @@ export type VerifyOutcome =
   | { kind: 'issuer_not_allowed'; host: string }
   | { kind: 'consent_required'; consentUrl: string }
   | { kind: 'release_unavailable' }
-  | { kind: 'key_list_unverified'; reason: KeyListFailure };
+  | { kind: 'key_list_unverified'; reason: KeyListFailure | 'revocations' };
 
 /**
  * PL212 (BPM105): an allowlist entry admits its exact host and hosts exactly one
@@ -131,6 +131,28 @@ export async function verifyAndSignIn(
     });
     return { kind: 'invalid_jwt', reason: 'key-revoked' };
   }
+  // 2c) PL263 / F-040 rev 15 D-6: a kid on revocations.json OR on the signed list is revoked.
+  //     altimist-id writes a device revocation as sha256("device:" + bare kid), lowercase hex.
+  //     Read here rather than with did-web-client's isRevoked, which has no timeout and reads a
+  //     body without a `revoked` array as "nothing revoked" (fail-open). Any failure refuses.
+  const revoked = await fetchRevocations();
+  if (!revoked) {
+    await safeAudit(deps.store, 'altimist.signin.refused', 'fail', {
+      reason: 'key_list_unverified',
+      listFailure: 'revocations',
+      host: issHost,
+    });
+    return { kind: 'key_list_unverified', reason: 'revocations' };
+  }
+  if (revoked.includes(await sha256Hex(`device:${verified.kid}`))) {
+    await safeAudit(deps.store, 'altimist.signin.refused', 'fail', {
+      reason: 'key_revoked',
+      kid: verified.kid,
+      handle,
+      via: 'revocations',
+    });
+    return { kind: 'invalid_jwt', reason: 'key-revoked' };
+  }
 
   // 3) Request the user's staff VC(s). A release outage fails the sign-in;
   //    consent_required is a pending state surfaced to the UI, not a refusal.
@@ -163,7 +185,7 @@ export async function verifyAndSignIn(
   return finishSignIn(deps, subjectDid, handle, role);
 }
 
-/** How long sign-in waits for the list (headers and body) before refusing it as `missing`. */
+/** How long sign-in waits for a list (headers and body) before refusing it as `missing`. */
 const KEY_LIST_TIMEOUT_MS = 5_000;
 
 /** The list body, or `null` (verifySignedKeyList's "missing") on any fetch failure, non-2xx or timeout. */
@@ -178,6 +200,26 @@ async function fetchKeyList(url: string): Promise<string | null> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** The revocation list altimist-id publishes; the same URL in every environment, as C-3 reads it. */
+const REVOCATIONS_URL = 'https://altimist.com/.well-known/revocations.json';
+
+/** `revoked` as an array of strings, or `null` on any fetch failure, non-2xx, timeout or malformed body. */
+async function fetchRevocations(): Promise<string[] | null> {
+  const body = await fetchKeyList(REVOCATIONS_URL);
+  if (body === null) return null;
+  try {
+    const revoked: unknown = (JSON.parse(body) as { revoked?: unknown } | null)?.revoked;
+    return Array.isArray(revoked) && revoked.every((h) => typeof h === 'string') ? revoked : null;
+  } catch {
+    return null;
+  }
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 async function roleFromReleasedVcs(

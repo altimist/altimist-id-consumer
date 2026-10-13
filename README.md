@@ -168,6 +168,13 @@ process already accepted, sign-in is refused with `key_list_unverified` (HTTP
 503); it never proceeds as if the list were empty. A bridge key on the list is
 refused as `invalid_jwt` / `key-revoked` (HTTP 401).
 
+Every sign-in also reads altimist-id's `https://altimist.com/.well-known/revocations.json`
+(the same URL in every environment; no cache, 5 s timeout). A kid on either list
+is revoked (PL263, F-040 rev 15 D-6): if `sha256("device:" + kid)` (lowercase hex,
+the bare kid) is in its `revoked` array, sign-in is refused as `key-revoked`. If it
+cannot be read, or `revoked` is not an array of strings, sign-in is refused with
+`key_list_unverified` / `revocations` (HTTP 503).
+
 You must also register an `AppPolicy` on altimist.id for your app (`appId`,
 `redirectOrigins` pointing at `https://<your-domain>/auth/altimist/callback`, and
 `signupOrigins` if you allow self-service register). Node-runtime middleware

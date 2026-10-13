@@ -392,8 +392,12 @@ describe('verifyAndSignIn — the signed dead-key list (Resolver C)', () => {
 
   it('gives up on a revocations.json host that never answers after 5 s: refused', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    // The signed list's check is real crypto, so start the clock only once revocations.json is asked for.
+    let asked!: () => void;
+    const revocationsAsked = new Promise<void>((r) => (asked = r));
     fetchMock.mockImplementation(async (url: unknown, init?: RequestInit) => {
       if (String(url) === TEST_DEADKEYS_URL) return listReply();
+      asked();
       return new Promise((_resolve, reject) => {
         init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
       });
@@ -402,6 +406,7 @@ describe('verifyAndSignIn — the signed dead-key list (Resolver C)', () => {
     const pending = verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS)).finally(() => {
       settled = true;
     });
+    await revocationsAsked;
     await vi.advanceTimersByTimeAsync(4_999);
     expect(settled).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
