@@ -26,7 +26,7 @@ describe('handoffInit', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { handoffUrl: string };
     const url = new URL(body.handoffUrl);
-    expect(url.origin + url.pathname).toBe('https://altimist.id/auth/handoff');
+    expect(url.origin + url.pathname).toBe('https://id.altimist.ai/auth/handoff');
     expect(url.searchParams.get('app_id')).toBe('test-app');
     expect(url.searchParams.get('redirect_uri')).toBe('http://localhost/auth/altimist/callback');
     const state = url.searchParams.get('state')!;
@@ -50,7 +50,7 @@ describe('registerInit', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { registerUrl: string };
     const url = new URL(body.registerUrl);
-    expect(url.origin + url.pathname).toBe('https://altimist.id/signup/self-service');
+    expect(url.origin + url.pathname).toBe('https://id.altimist.ai/signup/self-service');
     expect(url.searchParams.get('return_to')).toBe('http://localhost/auth/altimist/callback?flow=register');
   });
 });

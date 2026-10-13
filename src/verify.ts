@@ -18,7 +18,6 @@ import {
   fetchTeamIssuer,
   peekBridgeJwt,
   parseDid,
-  isIssuerAllowed,
 } from '@altimist/did-web-client';
 import type { Role } from './policy.js';
 import type { ResolvedConfig } from './config.js';
@@ -31,6 +30,23 @@ export type VerifyOutcome =
   | { kind: 'issuer_not_allowed'; host: string }
   | { kind: 'consent_required'; consentUrl: string }
   | { kind: 'release_unavailable' };
+
+/**
+ * PL212 (BPM105): an allowlist entry admits its exact host and hosts exactly one
+ * label under it. So `altimist.ai` admits `nathan.altimist.ai` but not
+ * `alice.staging.altimist.ai`, and `staging.altimist.ai` admits the latter.
+ * did-web-client's `isIssuerAllowed` matches by registrable domain, which
+ * cannot tell the two apart once staging sits under altimist.ai.
+ */
+function issuerHostAllowed(issHost: string, allowed: readonly string[]): boolean {
+  const host = issHost.toLowerCase();
+  return allowed.some((entry) => {
+    if (host === entry) return true;
+    if (!host.endsWith('.' + entry)) return false;
+    const label = host.slice(0, -(entry.length + 1));
+    return label.length > 0 && !label.includes('.');
+  });
+}
 
 /** F-020 US-5 — accept a bridge assertion bound to the issuer's own RP or the home RP. */
 function expectedRpIds(deps: ResolvedConfig, issHost: string): string[] {
@@ -55,7 +71,7 @@ export async function verifyAndSignIn(
     return { kind: 'invalid_jwt', reason: 'malformed' };
   }
 
-  if (!isIssuerAllowed(issHost, deps.allowedIssuers)) {
+  if (!issuerHostAllowed(issHost, deps.allowedIssuers)) {
     await safeAudit(deps.store, 'altimist.signin.refused', 'fail', {
       reason: 'issuer_not_allowed',
       host: issHost,

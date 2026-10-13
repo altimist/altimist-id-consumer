@@ -21,15 +21,15 @@ describe('resolveConfig — required fields', () => {
 });
 
 describe('resolveConfig — defaults', () => {
-  it('applies altimist.id production defaults', () => {
+  it('applies id.altimist.ai production defaults (PL212, ADR-073)', () => {
     const cfg = resolveConfig(base());
-    expect(cfg.rpId).toBe('altimist.id');
-    expect(cfg.origins).toEqual(['https://altimist.id']);
-    expect(cfg.altimistIdBaseUrl).toBe('https://altimist.id');
-    expect(cfg.releaseEndpoint).toBe('https://altimist.id/api/release/vcs');
+    expect(cfg.rpId).toBe('id.altimist.ai');
+    expect(cfg.origins).toEqual(['https://id.altimist.ai']);
+    expect(cfg.altimistIdBaseUrl).toBe('https://id.altimist.ai');
+    expect(cfg.releaseEndpoint).toBe('https://id.altimist.ai/api/release/vcs');
     expect(cfg.team).toBe('altimist');
     expect([...cfg.staffScopes]).toEqual(['staff.admin', 'staff.member']);
-    expect(cfg.allowedIssuers).toEqual(['altimist.com']); // from default resolverDomain
+    expect(cfg.allowedIssuers).toEqual(['altimist.ai']); // from default resolverDomain
     expect(cfg.staffTtlSeconds).toBe(7 * 24 * 60 * 60);
     expect(cfg.visitorTtlSeconds).toBe(24 * 60 * 60);
   });
