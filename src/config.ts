@@ -109,6 +109,17 @@ export interface ResolvedConfig {
 
 const DAY = 24 * 60 * 60;
 
+/** Resolver D's contract: a pinned list key is exactly {kty:'OKP', crv:'Ed25519', x: 32-byte base64url}. */
+function isPublicEd25519Jwk(k: unknown): boolean {
+  if (typeof k !== 'object' || k === null || Array.isArray(k)) return false;
+  const o = k as Record<string, unknown>;
+  const names = Object.keys(o).sort();
+  return (
+    names.length === 3 && names[0] === 'crv' && names[1] === 'kty' && names[2] === 'x' &&
+    o.kty === 'OKP' && o.crv === 'Ed25519' && typeof o.x === 'string' && /^[A-Za-z0-9_-]{43}$/.test(o.x)
+  );
+}
+
 export function resolveConfig(config: AidConfig): ResolvedConfig {
   if (!config.store) {
     throw new Error('AidConfig.store is required');
@@ -125,8 +136,11 @@ export function resolveConfig(config: AidConfig): ResolvedConfig {
   if (!isHttpsUrl(config.deadKeys.url)) {
     throw new Error('AidConfig.deadKeys.url must be an https URL');
   }
-  if (!config.deadKeys.listKeys || config.deadKeys.listKeys.length === 0) {
+  if (!Array.isArray(config.deadKeys.listKeys) || config.deadKeys.listKeys.length === 0) {
     throw new Error('AidConfig.deadKeys.listKeys must name at least one pinned list key');
+  }
+  if (!config.deadKeys.listKeys.every(isPublicEd25519Jwk)) {
+    throw new Error("AidConfig.deadKeys.listKeys entries must be exactly {kty:'OKP', crv:'Ed25519', x} (no 'd', no other member)");
   }
 
   const resolverDomain = (config.resolverDomain ?? 'altimist.ai').trim();
@@ -209,8 +223,9 @@ export function configFromEnv(): Partial<AidConfig> {
   if (process.env.ALTIMIST_RELEASE_BASE_URL) {
     out.altimistIdBaseUrl = process.env.ALTIMIST_RELEASE_BASE_URL;
   }
-  const deadKeysUrl = process.env.ALTIMIST_DEADKEYS_URL?.trim();
-  const listKeys = process.env.ALTIMIST_DEADKEYS_LIST_KEYS?.trim();
+  // Resolver D's names (DG146, BR2154), the same in every caller.
+  const deadKeysUrl = process.env.SIGNED_KEY_LIST_URL?.trim();
+  const listKeys = process.env.SIGNED_KEY_LIST_PUBLIC_JWKS?.trim();
   if (deadKeysUrl && listKeys) {
     let parsed: unknown;
     try {
@@ -219,7 +234,7 @@ export function configFromEnv(): Partial<AidConfig> {
       parsed = undefined;
     }
     if (!Array.isArray(parsed)) {
-      throw new Error('ALTIMIST_DEADKEYS_LIST_KEYS must be a JSON array of Ed25519 JWKs');
+      throw new Error('SIGNED_KEY_LIST_PUBLIC_JWKS must be a JSON array of Ed25519 JWKs');
     }
     out.deadKeys = { url: deadKeysUrl, listKeys: parsed as JsonWebKey[] };
   }

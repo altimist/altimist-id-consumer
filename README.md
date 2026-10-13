@@ -157,8 +157,8 @@ model AuthAuditLog {
 | `SESSION_PASSWORD` | iron-session sealing key (≥32 chars, **required**) |
 | `ALTIMIST_APP_ID` | matches your altimist.id `AppPolicy.appId` |
 | `ALTIMIST_ALLOWED_ISSUERS` | comma-separated `did:web` host eTLD+1s (federation; defaults to `altimist.com`) |
-| `ALTIMIST_DEADKEYS_URL` | https URL of the signed dead-key list (F-040 D-10; **required**, no default) |
-| `ALTIMIST_DEADKEYS_LIST_KEYS` | the pinned list keys, a JSON array of Ed25519 JWKs (F-040 D-9; **required**, no default) |
+| `SIGNED_KEY_LIST_URL` | https URL of Resolver D's signed key list (F-040 D-10; **required**, no default). Production `https://altimist.com/.well-known/signed-key-list.json`; staging `https://altimist.dev/.well-known/signed-key-list.json` |
+| `SIGNED_KEY_LIST_PUBLIC_JWKS` | the pinned list keys, a JSON array of public JWKs, each exactly `{"kty":"OKP","crv":"Ed25519","x":"…"}` (F-040 D-9; **required**, no default; any other member, `d` included, refuses to start) |
 | `API_KEY_HASH`, `API_KEY_HASH_SALT` | optional M2M X-API-Key gate |
 
 Every sign-in fetches the dead-key list and verifies it against the pinned list
