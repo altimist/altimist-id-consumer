@@ -135,7 +135,7 @@ export async function verifyAndSignIn(
   //     altimist-id writes a device revocation as sha256("device:" + bare kid), lowercase hex.
   //     Read here rather than with did-web-client's isRevoked, which has no timeout and reads a
   //     body without a `revoked` array as "nothing revoked" (fail-open). Any failure refuses.
-  const revoked = await fetchRevocations();
+  const revoked = await fetchRevocations(deps.revocationsUrl);
   if (!revoked) {
     await safeAudit(deps.store, 'altimist.signin.refused', 'fail', {
       reason: 'key_list_unverified',
@@ -202,16 +202,16 @@ async function fetchKeyList(url: string): Promise<string | null> {
   }
 }
 
-/** The revocation list altimist-id publishes; the same URL in every environment, as C-3 reads it. */
-const REVOCATIONS_URL = 'https://altimist.com/.well-known/revocations.json';
+/** A revocation entry: sha256 as 64 lowercase hex. Anything else could never match (NH283 n8). */
+const REVOCATION_HASH = /^[0-9a-f]{64}$/;
 
-/** `revoked` as an array of strings, or `null` on any fetch failure, non-2xx, timeout or malformed body. */
-async function fetchRevocations(): Promise<string[] | null> {
-  const body = await fetchKeyList(REVOCATIONS_URL);
+/** `revoked` as an array of hashes, or `null` on any fetch failure, non-2xx, timeout or malformed body. */
+async function fetchRevocations(url: string): Promise<string[] | null> {
+  const body = await fetchKeyList(url);
   if (body === null) return null;
   try {
     const revoked: unknown = (JSON.parse(body) as { revoked?: unknown } | null)?.revoked;
-    return Array.isArray(revoked) && revoked.every((h) => typeof h === 'string') ? revoked : null;
+    return Array.isArray(revoked) && revoked.every((h) => typeof h === 'string' && REVOCATION_HASH.test(h)) ? revoked : null;
   } catch {
     return null;
   }

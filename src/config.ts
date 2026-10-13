@@ -60,6 +60,12 @@ export interface AidConfig {
    * Required, with no default: the deployment sets both. `resolveConfig` throws without them.
    */
   deadKeys?: { url: string; listKeys: readonly JsonWebKey[] };
+  /**
+   * altimist-id's revocation list (PL263: a kid on it OR on the signed list is revoked). https.
+   * Default production's `https://altimist.com/.well-known/revocations.json`; staging sets its
+   * own, `https://id.staging.altimist.ai/api/resolver/revocations` (NH283 m5).
+   */
+  revocationsUrl?: string;
 
   // session
   staffTtlSeconds?: number; // default 7d
@@ -100,6 +106,7 @@ export interface ResolvedConfig {
   deadKeysListKeys: readonly JsonWebKey[];
   /** The last list `seq` this config accepted; in memory, per config (F-040 rev 15 D-6). */
   deadKeysSeen: SeqMemory;
+  revocationsUrl: string;
   staffTtlSeconds: number;
   visitorTtlSeconds: number;
   team: string;
@@ -150,6 +157,10 @@ export function resolveConfig(config: AidConfig): ResolvedConfig {
     config.allowedIssuers && config.allowedIssuers.length > 0
       ? config.allowedIssuers.map((s) => s.trim().toLowerCase()).filter(Boolean)
       : [resolverDomain.toLowerCase()];
+  const revocationsUrl = config.revocationsUrl ?? 'https://altimist.com/.well-known/revocations.json';
+  if (!isHttpsUrl(revocationsUrl)) {
+    throw new Error('AidConfig.revocationsUrl must be an https URL');
+  }
   const altimistIdBaseUrl = (config.altimistIdBaseUrl ?? 'https://id.altimist.ai')
     .trim()
     .replace(/\/$/, '');
@@ -179,6 +190,7 @@ export function resolveConfig(config: AidConfig): ResolvedConfig {
     deadKeysUrl: config.deadKeys.url,
     deadKeysListKeys: config.deadKeys.listKeys,
     deadKeysSeen: {},
+    revocationsUrl,
     staffTtlSeconds: config.staffTtlSeconds ?? 7 * DAY,
     visitorTtlSeconds: config.visitorTtlSeconds ?? DAY,
     team: config.team ?? 'altimist',
@@ -240,6 +252,8 @@ export function configFromEnv(): Partial<AidConfig> {
     }
     out.deadKeys = { url: deadKeysUrl, listKeys: parsed as JsonWebKey[] };
   }
+  const revocationsUrl = process.env.ALTIMIST_REVOCATIONS_URL?.trim();
+  if (revocationsUrl) out.revocationsUrl = revocationsUrl;
   if (process.env.API_KEY_HASH && process.env.API_KEY_HASH_SALT) {
     out.m2m = {
       apiKeyHash: process.env.API_KEY_HASH,
