@@ -54,10 +54,13 @@ describe('resolveConfig — required fields', () => {
       resolveConfig({ ...base(), deadKeys: { url: TEST_DEADKEYS_URL, listKeys: [TEST_LIST_KEY, bad as JsonWebKey] } }),
     ).toThrow(/deadKeys\.listKeys/);
   });
-  it('throws when listKeys is not an array', () => {
+  it.each([
+    ['one JWK object', TEST_LIST_KEY],
+    ['the JSON string of an array', JSON.stringify([TEST_LIST_KEY])],
+  ])('throws, with its own message, when listKeys is %s rather than an array', (_label, bad) => {
     expect(() =>
-      resolveConfig({ ...base(), deadKeys: { url: TEST_DEADKEYS_URL, listKeys: TEST_LIST_KEY as unknown as JsonWebKey[] } }),
-    ).toThrow(/deadKeys\.listKeys/);
+      resolveConfig({ ...base(), deadKeys: { url: TEST_DEADKEYS_URL, listKeys: bad as unknown as JsonWebKey[] } }),
+    ).toThrow(/deadKeys\.listKeys must name at least one pinned list key/);
   });
   it('carries the list config through, with its own seq memory per resolved config', () => {
     const a = resolveConfig(base());
@@ -157,6 +160,17 @@ describe('configFromEnv', () => {
     delete process.env.SIGNED_KEY_LIST_PUBLIC_JWKS;
     process.env.ALTIMIST_DEADKEYS_URL = TEST_DEADKEYS_URL;
     process.env.ALTIMIST_DEADKEYS_LIST_KEYS = JSON.stringify([TEST_LIST_KEY]);
+    expect('deadKeys' in configFromEnv()).toBe(false);
+  });
+
+  it('takes neither earlier name alongside a current one', () => {
+    process.env.ALTIMIST_DEADKEYS_URL = TEST_DEADKEYS_URL;
+    process.env.SIGNED_KEY_LIST_PUBLIC_JWKS = JSON.stringify([TEST_LIST_KEY]);
+    delete process.env.SIGNED_KEY_LIST_URL;
+    expect('deadKeys' in configFromEnv()).toBe(false);
+    delete process.env.SIGNED_KEY_LIST_PUBLIC_JWKS;
+    process.env.ALTIMIST_DEADKEYS_LIST_KEYS = JSON.stringify([TEST_LIST_KEY]);
+    process.env.SIGNED_KEY_LIST_URL = TEST_DEADKEYS_URL;
     expect('deadKeys' in configFromEnv()).toBe(false);
   });
 
