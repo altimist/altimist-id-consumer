@@ -9,6 +9,8 @@ npm install @altimist/altimist-id-consumer @altimist/did-web-client iron-session
 > **Status:** `0.x`, initial development. The API may change until mission-control
 > migrates onto it (mc#336). See [`docs/specs/F-001-altimist-id-consumer-package.md`](./docs/specs/F-001-altimist-id-consumer-package.md).
 
+> **Changed at the PL212 cutover (12/10/2026, [ADR-073](https://github.com/altimist/altimist-strategy/blob/main/decisions/ADR-073-altimist-id-on-altimist-ai.md)), from 0.2.0.** Altimist ID is at `id.altimist.ai`. It is the RP ID, the origin and the handoff host, and `altimist.id` forwards there. DIDs are `did:web:<handle>.altimist.ai`, so the default issuer allowlist is `altimist.ai`, and a `<handle>.altimist.com` issuer is refused. An allowlist entry admits its exact host and hosts exactly one label under it: `altimist.ai` admits `nathan.altimist.ai` but not `alice.staging.altimist.ai`. On staging, set the environment variables below to the `staging.altimist.ai` hosts; with `ALTIMIST_RESOLVER_DOMAIN=staging.altimist.ai` the default allowlist is `staging.altimist.ai`, which admits `<handle>.staging.altimist.ai`, so `ALTIMIST_ALLOWED_ISSUERS` can stay unset.
+
 ## What this is
 
 - **The ADR-031 pattern as a package.** A fail-closed `middleware.ts` choke point,
@@ -25,7 +27,7 @@ npm install @altimist/altimist-id-consumer @altimist/did-web-client iron-session
 
 - **Not** `@altimist/did-web-client`. That library is the verification primitive
   (DID + VC checks); this one is the full consumer integration that *uses* it.
-- **Not** an OAuth/OIDC server. Sign-in is a hosted handoff to altimist.id (where
+- **Not** an OAuth/OIDC server. Sign-in is a hosted handoff to Altimist ID (`id.altimist.ai`, where
   the passkey ceremony runs); everything else is local to your app.
 - **Not** owner of your database schema. You own your `schema.prisma`, migrations,
   and Prisma client.
@@ -155,11 +157,15 @@ model AuthAuditLog {
 | Var | Purpose |
 |---|---|
 | `SESSION_PASSWORD` | iron-session sealing key (≥32 chars, **required**) |
-| `ALTIMIST_APP_ID` | matches your altimist.id `AppPolicy.appId` |
-| `ALTIMIST_ALLOWED_ISSUERS` | comma-separated `did:web` host eTLD+1s (federation; defaults to `altimist.com`) |
+| `ALTIMIST_APP_ID` | matches your Altimist ID `AppPolicy.appId` |
+| `ALTIMIST_ALLOWED_ISSUERS` | comma-separated `did:web` hosts (federation); each admits its exact host and hosts exactly one label under it. Defaults to the resolver domain (`altimist.ai`; staging `staging.altimist.ai`) |
+| `ALTIMIST_RESOLVER_DOMAIN` | home domain for DIDs (default `altimist.ai`; staging `staging.altimist.ai`) |
+| `ALTIMIST_RP_ID` | RP ID the assertion is bound to (default `id.altimist.ai`; staging `id.staging.altimist.ai`) |
+| `ALTIMIST_ORIGIN` | comma-separated origins the assertion may come from (default `https://id.altimist.ai`; staging `https://id.staging.altimist.ai`) |
+| `ALTIMIST_RELEASE_BASE_URL` | Altimist ID origin for the handoff and VC release (default `https://id.altimist.ai`; staging `https://id.staging.altimist.ai`) |
 | `API_KEY_HASH`, `API_KEY_HASH_SALT` | optional M2M X-API-Key gate |
 
-You must also register an `AppPolicy` on altimist.id for your app (`appId`,
+You must also register an `AppPolicy` on Altimist ID for your app (`appId`,
 `redirectOrigins` pointing at `https://<your-domain>/auth/altimist/callback`, and
 `signupOrigins` if you allow self-service register). Node-runtime middleware
 requires **Next.js ≥ 15.5**.
