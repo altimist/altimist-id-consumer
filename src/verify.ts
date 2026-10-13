@@ -5,8 +5,8 @@
  * presence: a verified staff VC from the team hub ⇒ staff; anything else ⇒
  * visitor. A missing staff VC is NOT a refusal — it's the visitor path.
  *
- * Fail-closed: issuer-allowlist miss, bridge-verify failure, or a release outage
- * all deny sign-in; they never default-allow.
+ * Fail-closed: issuer-allowlist miss, bridge-verify failure, an unverified
+ * dead-key list, or a release outage all deny sign-in; they never default-allow.
  *
  * Takes `ResolvedConfig` as deps. The JIT race is handled here, Prisma-agnostically
  * (no error-code inspection), so the core stays free of any Prisma dependency.
@@ -18,6 +18,9 @@ import {
   fetchTeamIssuer,
   peekBridgeJwt,
   parseDid,
+  verifySignedKeyList,
+  decideKeyListUse,
+  type KeyListFailure,
 } from '@altimist/did-web-client';
 import type { Role } from './policy.js';
 import type { ResolvedConfig } from './config.js';
@@ -29,7 +32,8 @@ export type VerifyOutcome =
   | { kind: 'invalid_jwt'; reason: string }
   | { kind: 'issuer_not_allowed'; host: string }
   | { kind: 'consent_required'; consentUrl: string }
-  | { kind: 'release_unavailable' };
+  | { kind: 'release_unavailable' }
+  | { kind: 'key_list_unverified'; reason: KeyListFailure };
 
 /**
  * PL212 (BPM105): an allowlist entry admits its exact host and hosts exactly one
@@ -96,6 +100,35 @@ export async function verifyAndSignIn(
   const handle = verified.handle;
   const subjectDid = iss; // canonical DID the VC subject must match
 
+  // 2b) Resolver C (PL263, F-040 D-10): the bridge key must not be on the signed dead-key
+  //     list. Sign-in is consequence-bearing, so the list is used with the 'settlement'
+  //     intent only: any failure refuses, and a list that did not verify is never read as
+  //     an empty one (F-040 AC24).
+  const decision = decideKeyListUse(
+    await verifySignedKeyList(await fetchKeyList(deps.deadKeysUrl), {
+      listKeys: deps.deadKeysListKeys,
+      now: Date.now(),
+      seen: deps.deadKeysSeen,
+    }),
+    'settlement',
+  );
+  if (!decision.use) {
+    await safeAudit(deps.store, 'altimist.signin.refused', 'fail', {
+      reason: 'key_list_unverified',
+      listFailure: decision.reason,
+      host: issHost,
+    });
+    return { kind: 'key_list_unverified', reason: decision.reason };
+  }
+  if (decision.keys.includes(verified.kid)) {
+    await safeAudit(deps.store, 'altimist.signin.refused', 'fail', {
+      reason: 'key_revoked',
+      kid: verified.kid,
+      handle,
+    });
+    return { kind: 'invalid_jwt', reason: 'key-revoked' };
+  }
+
   // 3) Request the user's staff VC(s). A release outage fails the sign-in;
   //    consent_required is a pending state surfaced to the UI, not a refusal.
   const staffVcTypes = [...deps.staffScopes];
@@ -125,6 +158,16 @@ export async function verifyAndSignIn(
   const role = await roleFromReleasedVcs(deps, release.vcs, subjectDid);
 
   return finishSignIn(deps, subjectDid, handle, role);
+}
+
+/** The list body, or `null` (verifySignedKeyList's "missing") on any fetch failure or non-2xx. */
+async function fetchKeyList(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    return res.ok ? await res.text() : null;
+  } catch {
+    return null;
+  }
 }
 
 async function roleFromReleasedVcs(

@@ -157,7 +157,16 @@ model AuthAuditLog {
 | `SESSION_PASSWORD` | iron-session sealing key (≥32 chars, **required**) |
 | `ALTIMIST_APP_ID` | matches your altimist.id `AppPolicy.appId` |
 | `ALTIMIST_ALLOWED_ISSUERS` | comma-separated `did:web` host eTLD+1s (federation; defaults to `altimist.com`) |
+| `ALTIMIST_DEADKEYS_URL` | https URL of the signed dead-key list (F-040 D-10; **required**, no default) |
+| `ALTIMIST_DEADKEYS_LIST_KEYS` | the pinned list keys, a JSON array of Ed25519 JWKs (F-040 D-9; **required**, no default) |
 | `API_KEY_HASH`, `API_KEY_HASH_SALT` | optional M2M X-API-Key gate |
+
+Every sign-in fetches the dead-key list and verifies it against the pinned list
+keys (did-web-client's `verifySignedKeyList`, used with the `settlement` intent).
+If the list is missing, malformed, badly signed, expired or older than one this
+process already accepted, sign-in is refused with `key_list_unverified` (HTTP
+503); it never proceeds as if the list were empty. A bridge key on the list is
+refused as `invalid_jwt` / `key-revoked` (HTTP 401).
 
 You must also register an `AppPolicy` on altimist.id for your app (`appId`,
 `redirectOrigins` pointing at `https://<your-domain>/auth/altimist/callback`, and

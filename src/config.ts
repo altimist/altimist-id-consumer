@@ -6,6 +6,7 @@
  * leaking app defaults). `configFromEnv()` reads the ADR-031-mandated env names
  * for ergonomics; the consumer still supplies `store` and `policy` explicitly.
  */
+import type { SeqMemory } from '@altimist/did-web-client';
 import type { AidStore } from './store.js';
 import type { ResolvedPolicy } from './policy.js';
 import {
@@ -51,6 +52,13 @@ export interface AidConfig {
   /** Full VC-release endpoint. Default `${altimistIdBaseUrl}/api/release/vcs`. */
   releaseEndpoint?: string;
 
+  /**
+   * Resolver C (PL263, F-040 D-10): the signed dead-key list. Sign-in fetches it from `url`
+   * and refuses unless it verifies against one of `listKeys` (Ed25519 JWKs, F-040 D-9).
+   * Required, with no default: the deployment sets both. `resolveConfig` throws without them.
+   */
+  deadKeys?: { url: string; listKeys: readonly JsonWebKey[] };
+
   // session
   staffTtlSeconds?: number; // default 7d
   visitorTtlSeconds?: number; // default 24h
@@ -86,6 +94,10 @@ export interface ResolvedConfig {
   origins: string[];
   altimistIdBaseUrl: string;
   releaseEndpoint: string;
+  deadKeysUrl: string;
+  deadKeysListKeys: readonly JsonWebKey[];
+  /** The last list `seq` this config accepted; in memory, per config (F-040 D-10). */
+  deadKeysSeen: SeqMemory;
   staffTtlSeconds: number;
   visitorTtlSeconds: number;
   team: string;
@@ -106,6 +118,15 @@ export function resolveConfig(config: AidConfig): ResolvedConfig {
   }
   if (!config.appId) {
     throw new Error('AidConfig.appId is required');
+  }
+  if (!config.deadKeys) {
+    throw new Error('AidConfig.deadKeys is required (the signed dead-key list URL and its pinned list keys)');
+  }
+  if (!isHttpsUrl(config.deadKeys.url)) {
+    throw new Error('AidConfig.deadKeys.url must be an https URL');
+  }
+  if (!config.deadKeys.listKeys || config.deadKeys.listKeys.length === 0) {
+    throw new Error('AidConfig.deadKeys.listKeys must name at least one pinned list key');
   }
 
   const resolverDomain = (config.resolverDomain ?? 'altimist.ai').trim();
@@ -139,6 +160,9 @@ export function resolveConfig(config: AidConfig): ResolvedConfig {
         : ['https://id.altimist.ai'],
     altimistIdBaseUrl,
     releaseEndpoint: config.releaseEndpoint ?? `${altimistIdBaseUrl}/api/release/vcs`,
+    deadKeysUrl: config.deadKeys.url,
+    deadKeysListKeys: config.deadKeys.listKeys,
+    deadKeysSeen: {},
     staffTtlSeconds: config.staffTtlSeconds ?? 7 * DAY,
     visitorTtlSeconds: config.visitorTtlSeconds ?? DAY,
     team: config.team ?? 'altimist',
@@ -147,6 +171,14 @@ export function resolveConfig(config: AidConfig): ResolvedConfig {
     policy,
     matcher: config.matcher ?? DEFAULT_MATCHER,
   };
+}
+
+function isHttpsUrl(raw: string | undefined): boolean {
+  try {
+    return new URL(raw ?? '').protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -176,6 +208,20 @@ export function configFromEnv(): Partial<AidConfig> {
   }
   if (process.env.ALTIMIST_RELEASE_BASE_URL) {
     out.altimistIdBaseUrl = process.env.ALTIMIST_RELEASE_BASE_URL;
+  }
+  const deadKeysUrl = process.env.ALTIMIST_DEADKEYS_URL?.trim();
+  const listKeys = process.env.ALTIMIST_DEADKEYS_LIST_KEYS?.trim();
+  if (deadKeysUrl && listKeys) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(listKeys);
+    } catch {
+      parsed = undefined;
+    }
+    if (!Array.isArray(parsed)) {
+      throw new Error('ALTIMIST_DEADKEYS_LIST_KEYS must be a JSON array of Ed25519 JWKs');
+    }
+    out.deadKeys = { url: deadKeysUrl, listKeys: parsed as JsonWebKey[] };
   }
   if (process.env.API_KEY_HASH && process.env.API_KEY_HASH_SALT) {
     out.m2m = {

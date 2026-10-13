@@ -39,6 +39,7 @@ function verifyErrorMessage(error: string | undefined): string {
     case 'issuer_not_allowed':
       return "That identity provider isn't accepted here.";
     case 'release_unavailable':
+    case 'key_list_unverified':
       return 'AltimistID is temporarily unavailable. Try again in a moment.';
     default:
       return 'Sign-in could not be completed. Try again.';
