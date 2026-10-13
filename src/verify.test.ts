@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock only the I/O boundary of the AID client; keep the pure helpers
@@ -57,17 +58,27 @@ let store: InMemoryStore;
 let cfg: ResolvedConfig;
 
 let fetchMock: Mock;
+let listReply: () => Promise<Response>;
+let revocationsReply: () => Promise<Response>;
 /** Serve `body` as the dead-key list (status 200), or answer with `status` and no list. */
 function serveList(body: string, status = 200) {
-  fetchMock.mockResolvedValue(new Response(body, { status }));
+  listReply = async () => new Response(body, { status });
 }
+const REVOCATIONS_URL = 'https://altimist.com/.well-known/revocations.json';
+/** altimist-id writes a device revocation as hex sha256("device:" + bare kid) (F-040 D-6). */
+const deviceHash = (kid: string) => createHash('sha256').update(`device:${kid}`).digest('hex');
 
 beforeEach(async () => {
   vi.clearAllMocks();
   ({ store, cfg } = setup());
-  fetchMock = vi.fn();
+  fetchMock = vi.fn(async (url: unknown) => {
+    if (String(url) === TEST_DEADKEYS_URL) return listReply();
+    if (String(url) === REVOCATIONS_URL) return revocationsReply();
+    return new Response('not found', { status: 404 });
+  });
   vi.stubGlobal('fetch', fetchMock);
   serveList(await signedKeyList(['dead-1']));
+  revocationsReply = async () => Response.json({ revoked: [] });
 
   m.verifyBridgeJwt.mockResolvedValue({ ok: true, handle: 'nathan', kid: 'k1', jti: 'jti-1', iat: 0, exp: 0 });
   m.fetchTeamIssuer.mockResolvedValue({ team: 'altimist', jwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' } });
@@ -324,10 +335,80 @@ describe('verifyAndSignIn — the signed dead-key list (Resolver C)', () => {
   it('fetches the list from the configured URL and signs in when the bridge key is not on it', async () => {
     const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
     expect(out).toMatchObject({ kind: 'ok', handle: 'nathan' });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0][0])).toBe(TEST_DEADKEYS_URL);
+    expect(fetchMock.mock.calls.map(([u]) => String(u))).toEqual([TEST_DEADKEYS_URL, REVOCATIONS_URL]);
     // Never a cached copy: a cache could hide a key struck off a moment ago (NH219 n3).
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ cache: 'no-store' });
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ cache: 'no-store' });
+  });
+
+  // PL263 / F-040 D-6: a kid on revocations.json OR on the signed list is revoked (BR2311, from
+  // BR2280 M2 on mission-control#815). altimist-id writes a device revocation to
+  // revocations.json as sha256("device:" + bare kid), so a key revoked there before Resolver D
+  // re-signs the list is refused too.
+  it('refuses a bridge key whose sha256("device:" + kid) is on revocations.json, though the signed list passes', async () => {
+    revocationsReply = async () => Response.json({ revoked: ['other', deviceHash('k1')] });
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    expect(out).toEqual({ kind: 'invalid_jwt', reason: 'key-revoked' });
+    expect(store.sessions.size).toBe(0);
+    expect(m.releaseVcs).not.toHaveBeenCalled();
+    expect(store.audits).toContainEqual(
+      expect.objectContaining({
+        event: 'altimist.signin.refused',
+        metadata: expect.objectContaining({ reason: 'key_revoked', kid: 'k1', via: 'revocations' }),
+      }),
+    );
+  });
+
+  it('checks the signing kid on revocations.json, not the header hint', async () => {
+    m.verifyBridgeJwt.mockResolvedValue({ ok: true, handle: 'nathan', kid: 'dead-k', jti: 'jti-1', iat: 0, exp: 0 });
+    revocationsReply = async () => Response.json({ revoked: [deviceHash('dead-k')] });
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS, 'live-k'));
+    expect(out).toEqual({ kind: 'invalid_jwt', reason: 'key-revoked' });
+  });
+
+  it('signs in when revocations.json names only other keys, or the bare kid unhashed', async () => {
+    revocationsReply = async () => Response.json({ revoked: [deviceHash('k2'), 'k1', deviceHash('device:k1')] });
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    expect(out).toMatchObject({ kind: 'ok' });
+  });
+
+  // An unreadable revocations.json fails closed, like an unusable list: 503, nothing released.
+  it.each([
+    ['answers 404', async () => new Response('not found', { status: 404 })],
+    ['answers 503', async () => new Response('', { status: 503 })],
+    ['the fetch throws', async () => { throw new TypeError('fetch failed'); }],
+    ['is not JSON', async () => new Response('<html>', { status: 200 })],
+    ['has no revoked array', async () => Response.json({})],
+    ['has a revoked that is not an array', async () => Response.json({ revoked: 'k1' })],
+    ['has a non-string entry', async () => Response.json({ revoked: [1] })],
+  ] as const)('revocations.json %s: refused as key_list_unverified (revocations)', async (_name, reply) => {
+    revocationsReply = reply;
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    expect(out).toEqual({ kind: 'key_list_unverified', reason: 'revocations' });
+    expect(store.sessions.size).toBe(0);
+    expect(m.releaseVcs).not.toHaveBeenCalled();
+    refusedWith('revocations');
+  });
+
+  it('gives up on a revocations.json host that never answers after 5 s: refused', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    fetchMock.mockImplementation(async (url: unknown, init?: RequestInit) => {
+      if (String(url) === TEST_DEADKEYS_URL) return listReply();
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      });
+    });
+    let settled = false;
+    const pending = verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS)).finally(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    vi.useRealTimers();
+    const out = await Promise.race([pending, new Promise((r) => setTimeout(() => r('still pending'), 500))]);
+    expect(out).toEqual({ kind: 'key_list_unverified', reason: 'revocations' });
+    expect(store.sessions.size).toBe(0);
   });
 
   it('a verified list with no keys on it is a real answer: sign-in proceeds', async () => {

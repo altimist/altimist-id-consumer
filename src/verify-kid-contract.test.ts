@@ -3,6 +3,7 @@
 // with a real P-256 key (the WebAuthn segments forged the way did-web-client's own
 // bridge.test.ts does), so the kid compared against the list is the one did-web-client
 // actually returns: the bare fragment of the verification method, e.g. "cred-abc".
+import { createHash } from 'node:crypto';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { bridgeChallenge, BRIDGE_ALG, BRIDGE_TYP, BRIDGE_TTL_SECONDS } from '@altimist/did-web-client';
 import { verifyAndSignIn } from './verify.js';
@@ -17,6 +18,7 @@ const DID_URL = `https://${HANDLE}.altimist.ai/.well-known/did.json`;
 // setup()'s defaults: origins ['https://id.altimist.ai'], rpId 'id.altimist.ai'.
 const ORIGIN = 'https://id.altimist.ai';
 const RPID = 'id.altimist.ai';
+const REVOCATIONS_URL = 'https://altimist.com/.well-known/revocations.json';
 
 const b64u = (bytes: Uint8Array | string) => Buffer.from(bytes).toString('base64url');
 const sha256 = async (bytes: Uint8Array) => new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
@@ -60,8 +62,8 @@ let store: InMemoryStore;
 let cfg: ResolvedConfig;
 let fetchMock: ReturnType<typeof vi.fn>;
 
-/** Serve the DID document and `list`; anything else (the VC release) answers 503. */
-function serve(list: string) {
+/** Serve the DID document, `list` and `revoked`; anything else (the VC release) answers 503. */
+function serve(list: string, revoked: string[] = []) {
   fetchMock.mockImplementation(async (input: unknown) => {
     const url = String(input instanceof Request ? input.url : input);
     if (url === DID_URL) {
@@ -77,6 +79,7 @@ function serve(list: string) {
       );
     }
     if (url === TEST_DEADKEYS_URL) return new Response(list, { status: 200 });
+    if (url === REVOCATIONS_URL) return Response.json({ revoked });
     return new Response('unavailable', { status: 503 });
   });
 }
@@ -110,5 +113,12 @@ describe('the bare-kid contract against the real verifyBridgeJwt (NH219 n5)', ()
     // Past the kid check: the release endpoint (503 here) is what refuses, not the list.
     expect(out).toEqual({ kind: 'release_unavailable' });
     expect(fetchMock.mock.calls.map(([u]) => String(u))).toContain(cfg.releaseEndpoint);
+  });
+
+  it('refuses when revocations.json holds sha256("device:" + the bare credential id)', async () => {
+    serve(await signedKeyList([]), [createHash('sha256').update(`device:${KID}`).digest('hex')]);
+    const out = await verifyAndSignIn(cfg, await forgeBridgeJwt());
+    expect(out).toEqual({ kind: 'invalid_jwt', reason: 'key-revoked' });
+    expect(store.sessions.size).toBe(0);
   });
 });
