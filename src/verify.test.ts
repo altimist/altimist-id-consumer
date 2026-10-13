@@ -44,8 +44,8 @@ const m = {
 function b64url(obj: unknown): string {
   return Buffer.from(JSON.stringify(obj)).toString('base64url');
 }
-function makeBridgeJwt(iss: string): string {
-  const header = { alg: 'WEBAUTHN-ES256', typ: 'JWT+WAS', kid: 'k1' };
+function makeBridgeJwt(iss: string, kid = 'k1'): string {
+  const header = { alg: 'WEBAUTHN-ES256', typ: 'JWT+WAS', kid };
   const payload = { iss, sub: iss, iat: 0, exp: 0, jti: 'jti-1' };
   return `${b64url(header)}.${b64url(payload)}.${b64url({ sig: 'x' })}`;
 }
@@ -75,6 +75,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -325,12 +326,26 @@ describe('verifyAndSignIn — the signed dead-key list (Resolver C)', () => {
     expect(out).toMatchObject({ kind: 'ok', handle: 'nathan' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0][0])).toBe(TEST_DEADKEYS_URL);
+    // Never a cached copy: a cache could hide a key struck off a moment ago (NH219 n3).
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ cache: 'no-store' });
   });
 
   it('a verified list with no keys on it is a real answer: sign-in proceeds', async () => {
     serveList(await signedKeyList([]));
     const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
     expect(out).toMatchObject({ kind: 'ok' });
+  });
+
+  // The list is checked against the key that VERIFIED the signature (verifyBridgeJwt's kid),
+  // never the header's hint: verifyBridgeJwt tries every method in the DID document, so a dead
+  // key can sign while the header names a live one (NH219 m1).
+  it('refuses a dead signing key whose header names a live key', async () => {
+    serveList(await signedKeyList(['dead-k']));
+    m.verifyBridgeJwt.mockResolvedValue({ ok: true, handle: 'nathan', kid: 'dead-k', jti: 'jti-1', iat: 0, exp: 0 });
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS, 'live-k'));
+    expect(out).toMatchObject({ kind: 'invalid_jwt', reason: 'key-revoked' });
+    expect(store.sessions.size).toBe(0);
+    expect(m.releaseVcs).not.toHaveBeenCalled();
   });
 
   it('refuses a bridge key that is on the verified list, before any VC release', async () => {
@@ -364,6 +379,16 @@ describe('verifyAndSignIn — the signed dead-key list (Resolver C)', () => {
     }],
     ['expired: valid_until has passed', 'expired', async () =>
       serveList(await signedKeyList(['dead-1'], { issuedAt: Date.now() - 600_000 }))],
+    // did-web-client 57db6c1 threw out of verifyAndSignIn on this (a 500, no audit row; NH219 M1).
+    ['signature: a sig of length 1 mod 4 (AAAAA)', 'signature', async () => {
+      const l = JSON.parse(await signedKeyList(['dead-1']));
+      serveList(JSON.stringify({ ...l, sig: 'AAAAA' }));
+    }],
+    // A signed list may live 300 s at most (F-040 rev 15 D-6); 57db6c1 accepted both (NH219 M1).
+    ['expired: valid_until a year out', 'expired', async () =>
+      serveList(await signedKeyList(['dead-1'], { validUntil: Date.now() + 365 * 86_400_000 }))],
+    ['expired: issuedAt an hour in the future', 'expired', async () =>
+      serveList(await signedKeyList(['dead-1'], { issuedAt: Date.now() + 3_600_000 }))],
   ])('%s: refused as key_list_unverified, nothing projected', async (_name, reason, arrange) => {
     await arrange();
     const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
@@ -372,6 +397,30 @@ describe('verifyAndSignIn — the signed dead-key list (Resolver C)', () => {
     expect(store.sessions.size).toBe(0);
     expect(m.releaseVcs).not.toHaveBeenCalled();
     refusedWith(reason);
+  });
+
+  // A list host that accepts the connection and never answers must not hold sign-in open: after
+  // 5 s the fetch is aborted, which is `missing`, so 503 (NH219 m2).
+  it('gives up on a list host that never answers after 5 s: missing, refused', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    fetchMock.mockImplementation(
+      (_url: string, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+        }),
+    );
+    let settled = false;
+    const pending = verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS)).finally(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    vi.useRealTimers();
+    const out = await Promise.race([pending, new Promise((r) => setTimeout(() => r('still pending'), 500))]);
+    expect(out).toEqual({ kind: 'key_list_unverified', reason: 'missing' });
+    refusedWith('missing');
+    expect(store.sessions.size).toBe(0);
   });
 
   it('refuses a list whose seq is below one this config already accepted (replay)', async () => {
