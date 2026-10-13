@@ -346,7 +346,7 @@ describe('verifyAndSignIn — the signed dead-key list (Resolver C)', () => {
   // revocations.json as sha256("device:" + bare kid), so a key revoked there before Resolver D
   // re-signs the list is refused too.
   it('refuses a bridge key whose sha256("device:" + kid) is on revocations.json, though the signed list passes', async () => {
-    revocationsReply = async () => Response.json({ revoked: ['other', deviceHash('k1')] });
+    revocationsReply = async () => Response.json({ revoked: [deviceHash('other'), deviceHash('k1')] });
     const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
     expect(out).toEqual({ kind: 'invalid_jwt', reason: 'key-revoked' });
     expect(store.sessions.size).toBe(0);
@@ -359,6 +359,19 @@ describe('verifyAndSignIn — the signed dead-key list (Resolver C)', () => {
     );
   });
 
+  // NH283 m5 / BR2391: the URL is config (default production's list); staging sets its own.
+  it('reads revocations.json from the configured URL, not the production default', async () => {
+    const STAGING_REVOCATIONS = 'https://id.staging.altimist.ai/api/resolver/revocations';
+    fetchMock.mockImplementation(async (url: unknown) => {
+      if (String(url) === TEST_DEADKEYS_URL) return listReply();
+      if (String(url) === STAGING_REVOCATIONS) return Response.json({ revoked: [deviceHash('k1')] });
+      return Response.json({ revoked: [] });
+    });
+    const out = await verifyAndSignIn({ ...cfg, revocationsUrl: STAGING_REVOCATIONS }, makeBridgeJwt(ALT_ISS));
+    expect(out).toEqual({ kind: 'invalid_jwt', reason: 'key-revoked' });
+    expect(fetchMock.mock.calls.map(([u]) => String(u))).toEqual([TEST_DEADKEYS_URL, STAGING_REVOCATIONS]);
+  });
+
   it('checks the signing kid on revocations.json, not the header hint', async () => {
     m.verifyBridgeJwt.mockResolvedValue({ ok: true, handle: 'nathan', kid: 'dead-k', jti: 'jti-1', iat: 0, exp: 0 });
     revocationsReply = async () => Response.json({ revoked: [deviceHash('dead-k')] });
@@ -366,8 +379,9 @@ describe('verifyAndSignIn — the signed dead-key list (Resolver C)', () => {
     expect(out).toEqual({ kind: 'invalid_jwt', reason: 'key-revoked' });
   });
 
-  it('signs in when revocations.json names only other keys, or the bare kid unhashed', async () => {
-    revocationsReply = async () => Response.json({ revoked: [deviceHash('k2'), 'k1', deviceHash('device:k1')] });
+  it('signs in when revocations.json names only other keys, the kid hashed without "device:", or "device:" twice', async () => {
+    const plainHash = createHash('sha256').update('k1').digest('hex');
+    revocationsReply = async () => Response.json({ revoked: [deviceHash('k2'), plainHash, deviceHash('device:k1')] });
     const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
     expect(out).toMatchObject({ kind: 'ok' });
   });
@@ -381,6 +395,11 @@ describe('verifyAndSignIn — the signed dead-key list (Resolver C)', () => {
     ['has no revoked array', async () => Response.json({})],
     ['has a revoked that is not an array', async () => Response.json({ revoked: 'k1' })],
     ['has a non-string entry', async () => Response.json({ revoked: [1] })],
+    // NH283 n8: every entry is 64 lowercase hex. Anything else can never match, so it is malformed.
+    ['has the signing kid upper-cased', async () => Response.json({ revoked: [deviceHash('k1').toUpperCase()] })],
+    ['has a space-padded entry', async () => Response.json({ revoked: [` ${deviceHash('k1')}`] })],
+    ['has the bare kid, not a hash', async () => Response.json({ revoked: ['k1'] })],
+    ['has a 63-character entry', async () => Response.json({ revoked: [deviceHash('k1').slice(1)] })],
   ] as const)('revocations.json %s: refused as key_list_unverified (revocations)', async (_name, reply) => {
     revocationsReply = reply;
     const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));

@@ -84,6 +84,15 @@ describe('resolveConfig — defaults', () => {
     expect(cfg.allowedIssuers).toEqual(['altimist.ai']); // from default resolverDomain
     expect(cfg.staffTtlSeconds).toBe(7 * 24 * 60 * 60);
     expect(cfg.visitorTtlSeconds).toBe(24 * 60 * 60);
+    expect(cfg.revocationsUrl).toBe('https://altimist.com/.well-known/revocations.json');
+  });
+
+  // NH283 m5 / BR2391: staging altimist-id publishes its own revocation list.
+  it('takes a configured https revocations URL, and refuses one that is not https', () => {
+    const staging = 'https://id.staging.altimist.ai/api/resolver/revocations';
+    expect(resolveConfig({ ...base(), revocationsUrl: staging }).revocationsUrl).toBe(staging);
+    expect(() => resolveConfig({ ...base(), revocationsUrl: 'http://id.staging.altimist.ai/r' })).toThrow(/revocationsUrl/);
+    expect(() => resolveConfig({ ...base(), revocationsUrl: 'not a url' })).toThrow(/revocationsUrl/);
   });
 
   it('honours an explicit allowedIssuers (lowercased)', () => {
@@ -188,6 +197,13 @@ describe('configFromEnv', () => {
       process.env.SIGNED_KEY_LIST_PUBLIC_JWKS = bad;
       expect(() => configFromEnv()).toThrow(/SIGNED_KEY_LIST_PUBLIC_JWKS/);
     }
+  });
+
+  it('reads ALTIMIST_REVOCATIONS_URL, and leaves it unset when absent (production default)', () => {
+    process.env.ALTIMIST_REVOCATIONS_URL = ' https://id.staging.altimist.ai/api/resolver/revocations ';
+    expect(configFromEnv().revocationsUrl).toBe('https://id.staging.altimist.ai/api/resolver/revocations');
+    delete process.env.ALTIMIST_REVOCATIONS_URL;
+    expect('revocationsUrl' in configFromEnv()).toBe(false);
   });
 
   it('omits keys that are unset (so resolveConfig defaults apply)', () => {
