@@ -154,12 +154,13 @@ export interface AidConfig {
   store: AidStore;                       // required — the data seam
   sessionPassword?: string;              // ≥32 chars; usually via configFromEnv(); runtime-validated
   appId?: string;                        // matches an altimist.id AppPolicy.appId; usually via env
-  // identity / verification (all defaulted to the altimist.id production values)
-  allowedIssuers?: readonly string[];    // eTLD+1 hosts; default [resolverDomain]
-  resolverDomain?: string;               // default 'altimist.com'
-  rpId?: string;                         // default 'altimist.id'
-  origins?: string[];                    // default ['https://altimist.id']
-  altimistIdBaseUrl?: string;            // default 'https://altimist.id'
+  // identity / verification (all defaulted to Altimist ID's production values,
+  // id.altimist.ai since PL212 / ADR-073; staging values in the README)
+  allowedIssuers?: readonly string[];    // exact host + one label under it (PL212); default [resolverDomain]
+  resolverDomain?: string;               // default 'altimist.ai' ('altimist.com' before PL212)
+  rpId?: string;                         // default 'id.altimist.ai' ('altimist.id' before PL212)
+  origins?: string[];                    // default ['https://id.altimist.ai']
+  altimistIdBaseUrl?: string;            // default 'https://id.altimist.ai'
   releaseEndpoint?: string;              // default `${altimistIdBaseUrl}/api/release/vcs`
   // session TTLs
   staffTtlSeconds?: number;              // default 7d
