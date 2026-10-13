@@ -11,7 +11,7 @@ export const TEST_SESSION_PASSWORD = 'test-password-test-password-test-password'
 
 // Resolver C (PL263): a pinned list key for the signed dead-key list, and a second key
 // nobody pinned. Test-only Ed25519 pairs; the private half (`d`) never leaves this file.
-const TEST_LIST_PRIVATE: JsonWebKey = {
+export const TEST_LIST_PRIVATE: JsonWebKey = {
   kty: 'OKP', crv: 'Ed25519',
   x: 'Lk18bMfY7ETjo4I-36D4ru4fmuLazY4EKlL9qYVWvW4', d: 'YshYa5ILIw_vDcygYDlO2pT59O8_RTQrDL81F-QNnO4',
 };
@@ -20,7 +20,7 @@ export const UNPINNED_LIST_PRIVATE: JsonWebKey = {
   x: 'smVFXLHvfQZGat31sxqJawwlIvC0dym5CWdfuXytzt4', d: 'uaovLFV1U9uQVRqlZ5RYo_L6hOU9nTxcJtDf2gEjjmQ',
 };
 export const TEST_LIST_KEY: JsonWebKey = { kty: 'OKP', crv: 'Ed25519', x: TEST_LIST_PRIVATE.x };
-export const TEST_DEADKEYS_URL = 'https://id.altimist.ai/.well-known/deadkeys.json';
+export const TEST_DEADKEYS_URL = 'https://altimist.com/.well-known/signed-key-list.json';
 
 /**
  * A dead-key list in F-040 D-10's shape, signed with Ed25519 over the JCS of the four

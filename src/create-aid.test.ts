@@ -41,13 +41,13 @@ describe('createAid — wiring', () => {
     const prev = {
       sp: process.env.SESSION_PASSWORD,
       app: process.env.ALTIMIST_APP_ID,
-      dkUrl: process.env.ALTIMIST_DEADKEYS_URL,
-      dkKeys: process.env.ALTIMIST_DEADKEYS_LIST_KEYS,
+      dkUrl: process.env.SIGNED_KEY_LIST_URL,
+      dkKeys: process.env.SIGNED_KEY_LIST_PUBLIC_JWKS,
     };
     process.env.SESSION_PASSWORD = 'x'.repeat(40);
     process.env.ALTIMIST_APP_ID = 'env-app';
-    process.env.ALTIMIST_DEADKEYS_URL = TEST_DEADKEYS_URL;
-    process.env.ALTIMIST_DEADKEYS_LIST_KEYS = JSON.stringify([TEST_LIST_KEY]);
+    process.env.SIGNED_KEY_LIST_URL = TEST_DEADKEYS_URL;
+    process.env.SIGNED_KEY_LIST_PUBLIC_JWKS = JSON.stringify([TEST_LIST_KEY]);
     try {
       // This is the canonical greenfield pattern; it must both typecheck (spread
       // of Partial<AidConfig>) and construct at runtime.
@@ -57,8 +57,8 @@ describe('createAid — wiring', () => {
       for (const [k, v] of [
         ['SESSION_PASSWORD', prev.sp],
         ['ALTIMIST_APP_ID', prev.app],
-        ['ALTIMIST_DEADKEYS_URL', prev.dkUrl],
-        ['ALTIMIST_DEADKEYS_LIST_KEYS', prev.dkKeys],
+        ['SIGNED_KEY_LIST_URL', prev.dkUrl],
+        ['SIGNED_KEY_LIST_PUBLIC_JWKS', prev.dkKeys],
       ] as const) {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;

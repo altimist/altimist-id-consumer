@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { resolveConfig, configFromEnv } from './config.js';
-import { inMemoryStore, TEST_SESSION_PASSWORD, TEST_DEADKEYS_URL, TEST_LIST_KEY } from './test-helpers.js';
+import { inMemoryStore, TEST_SESSION_PASSWORD, TEST_DEADKEYS_URL, TEST_LIST_KEY, TEST_LIST_PRIVATE } from './test-helpers.js';
 
 const base = () => ({
   store: inMemoryStore(),
@@ -33,6 +33,31 @@ describe('resolveConfig — required fields', () => {
   });
   it('throws without at least one pinned list key', () => {
     expect(() => resolveConfig({ ...base(), deadKeys: { url: TEST_DEADKEYS_URL, listKeys: [] } })).toThrow(/deadKeys\.listKeys/);
+  });
+  // Resolver D's contract (DG146, via BR2154): each pinned key is exactly {kty:'OKP', crv:'Ed25519', x}.
+  // Any other member, a private 'd' above all, or another key type refuses to start.
+  it.each([
+    ['a private d', { ...TEST_LIST_KEY, d: 'YshYa5ILIw_vDcygYDlO2pT59O8_RTQrDL81F-QNnO4' }],
+    ['a kid', { ...TEST_LIST_KEY, kid: 'list-1' }],
+    ['a use', { ...TEST_LIST_KEY, use: 'sig' }],
+    ['key_ops', { ...TEST_LIST_KEY, key_ops: ['verify'] }],
+    ['kty EC', { ...TEST_LIST_KEY, kty: 'EC' }],
+    ['crv X25519', { ...TEST_LIST_KEY, crv: 'X25519' }],
+    ['no x', { kty: 'OKP', crv: 'Ed25519' }],
+    ['x not base64url', { ...TEST_LIST_KEY, x: TEST_LIST_KEY.x!.slice(0, 42) + '=' }],
+    ['x the wrong length', { ...TEST_LIST_KEY, x: TEST_LIST_KEY.x!.slice(0, 40) }],
+    ['x not a string', { ...TEST_LIST_KEY, x: 7 }],
+    ['null', null],
+    ['an array', [TEST_LIST_KEY]],
+  ])('throws on a pinned list key carrying %s', (_label, bad) => {
+    expect(() =>
+      resolveConfig({ ...base(), deadKeys: { url: TEST_DEADKEYS_URL, listKeys: [TEST_LIST_KEY, bad as JsonWebKey] } }),
+    ).toThrow(/deadKeys\.listKeys/);
+  });
+  it('throws when listKeys is not an array', () => {
+    expect(() =>
+      resolveConfig({ ...base(), deadKeys: { url: TEST_DEADKEYS_URL, listKeys: TEST_LIST_KEY as unknown as JsonWebKey[] } }),
+    ).toThrow(/deadKeys\.listKeys/);
   });
   it('carries the list config through, with its own seq memory per resolved config', () => {
     const a = resolveConfig(base());
@@ -116,22 +141,38 @@ describe('configFromEnv', () => {
   });
 
   it('reads the dead-key list URL and the pinned list keys (a JSON array of JWKs)', () => {
-    process.env.ALTIMIST_DEADKEYS_URL = TEST_DEADKEYS_URL;
-    process.env.ALTIMIST_DEADKEYS_LIST_KEYS = JSON.stringify([TEST_LIST_KEY]);
+    process.env.SIGNED_KEY_LIST_URL = TEST_DEADKEYS_URL;
+    process.env.SIGNED_KEY_LIST_PUBLIC_JWKS = JSON.stringify([TEST_LIST_KEY]);
     expect(configFromEnv().deadKeys).toEqual({ url: TEST_DEADKEYS_URL, listKeys: [TEST_LIST_KEY] });
   });
 
   it('leaves deadKeys unset unless both are set (resolveConfig then refuses to start)', () => {
-    process.env.ALTIMIST_DEADKEYS_URL = TEST_DEADKEYS_URL;
-    delete process.env.ALTIMIST_DEADKEYS_LIST_KEYS;
+    process.env.SIGNED_KEY_LIST_URL = TEST_DEADKEYS_URL;
+    delete process.env.SIGNED_KEY_LIST_PUBLIC_JWKS;
     expect('deadKeys' in configFromEnv()).toBe(false);
   });
 
-  it('throws on list keys that are not a JSON array', () => {
+  it('reads only SIGNED_KEY_LIST_URL and SIGNED_KEY_LIST_PUBLIC_JWKS, not the earlier names', () => {
+    delete process.env.SIGNED_KEY_LIST_URL;
+    delete process.env.SIGNED_KEY_LIST_PUBLIC_JWKS;
     process.env.ALTIMIST_DEADKEYS_URL = TEST_DEADKEYS_URL;
+    process.env.ALTIMIST_DEADKEYS_LIST_KEYS = JSON.stringify([TEST_LIST_KEY]);
+    expect('deadKeys' in configFromEnv()).toBe(false);
+  });
+
+  it('a private JWK in SIGNED_KEY_LIST_PUBLIC_JWKS refuses to start', () => {
+    process.env.SESSION_PASSWORD = 'p'.repeat(40);
+    process.env.ALTIMIST_APP_ID = 'env-app';
+    process.env.SIGNED_KEY_LIST_URL = TEST_DEADKEYS_URL;
+    process.env.SIGNED_KEY_LIST_PUBLIC_JWKS = JSON.stringify([TEST_LIST_PRIVATE]);
+    expect(() => resolveConfig({ ...configFromEnv(), store: inMemoryStore() } as any)).toThrow(/deadKeys\.listKeys/);
+  });
+
+  it('throws on list keys that are not a JSON array', () => {
+    process.env.SIGNED_KEY_LIST_URL = TEST_DEADKEYS_URL;
     for (const bad of ['not json', '{"kty":"OKP"}']) {
-      process.env.ALTIMIST_DEADKEYS_LIST_KEYS = bad;
-      expect(() => configFromEnv()).toThrow(/ALTIMIST_DEADKEYS_LIST_KEYS/);
+      process.env.SIGNED_KEY_LIST_PUBLIC_JWKS = bad;
+      expect(() => configFromEnv()).toThrow(/SIGNED_KEY_LIST_PUBLIC_JWKS/);
     }
   });
 
