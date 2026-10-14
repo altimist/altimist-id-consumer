@@ -42,7 +42,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "dependencies": {
-    "@altimist/did-web-client": "file:vendor/altimist-did-web-client-0.12.0-d970e0f.tgz",
+    "@altimist/did-web-client": "0.12.0",
     "iron-session": "^8.0.4",
     "zod": "^3.23.8"
   },
