@@ -1,6 +1,7 @@
 // altimist/altimist-ai#2519 row 60 — safeAudit on its own. The route tests drive it through a
-// store that never throws, so nothing showed that a failing audit write leaves the request alone,
-// or that a missing metadata argument is stored as {} rather than undefined.
+// store that never throws, so nothing showed that safeAudit swallows a failing audit write,
+// or that a missing metadata argument is stored as {} rather than undefined. Whether a route then
+// carries on is the routes' own claim, and they are left out here (PL405).
 import { describe, it, expect, vi } from 'vitest';
 import { safeAudit } from './audit.js';
 import { inMemoryStore } from './test-helpers.js';
@@ -18,14 +19,14 @@ describe('safeAudit', () => {
     expect(store.audits).toEqual([{ event: 'logout', outcome: 'success', metadata: {} }]);
   });
 
-  it('swallows a store that throws, so the request it describes carries on', async () => {
+  it('resolves when the store rejects', async () => {
     const store = inMemoryStore();
     store.writeAudit = vi.fn(() => Promise.reject(new Error('database is down')));
     await expect(safeAudit(store, 'altimist.signin', 'success', { handle: 'a' })).resolves.toBeUndefined();
     expect(store.writeAudit).toHaveBeenCalledTimes(1);
   });
 
-  it('swallows a store that throws synchronously too', async () => {
+  it('resolves when the store throws synchronously', async () => {
     const store = inMemoryStore();
     store.writeAudit = vi.fn(() => {
       throw new Error('not connected');
