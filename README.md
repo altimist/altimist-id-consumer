@@ -163,7 +163,25 @@ model AuthAuditLog {
 | `ALTIMIST_RP_ID` | RP ID the assertion is bound to (default `id.altimist.ai`; staging `id.staging.altimist.ai`) |
 | `ALTIMIST_ORIGIN` | comma-separated origins the assertion may come from (default `https://id.altimist.ai`; staging `https://id.staging.altimist.ai`) |
 | `ALTIMIST_RELEASE_BASE_URL` | Altimist ID origin for the handoff and VC release (default `https://id.altimist.ai`; staging `https://id.staging.altimist.ai`) |
+| `SIGNED_KEY_LIST_URL` | https URL of Resolver D's signed key list (F-040 rev 15 D-6; **required**, no default). Production `https://altimist.com/.well-known/signed-key-list.json`; staging `https://altimist.dev/.well-known/signed-key-list.json` |
+| `SIGNED_KEY_LIST_PUBLIC_JWKS` | the pinned list keys, a JSON array of public JWKs, each exactly `{"kty":"OKP","crv":"Ed25519","x":"…"}` (**required**, no default; an interim departure from F-040 rev 15 D-4, which pins the trust anchor in `@altimist/did-web-client`: until it does, whoever sets this sets the revocation trust root; any other member, `d` included, refuses to start) |
+| `ALTIMIST_REVOCATIONS_URL` | https URL of Altimist ID's revocation list (default production's `https://altimist.com/.well-known/revocations.json`; staging `https://id.staging.altimist.ai/api/resolver/revocations`) |
 | `API_KEY_HASH`, `API_KEY_HASH_SALT` | optional M2M X-API-Key gate |
+
+Every sign-in fetches the dead-key list and verifies it against the pinned list
+keys (did-web-client's `verifySignedKeyList`, used with the `settlement` intent).
+If the list is missing, malformed, badly signed, expired or older than one this
+process already accepted, sign-in is refused with `key_list_unverified` (HTTP
+503); it never proceeds as if the list were empty. A bridge key on the list is
+refused as `invalid_jwt` / `key-revoked` (HTTP 401).
+
+Every sign-in also reads Altimist ID's revocation list at `ALTIMIST_REVOCATIONS_URL`
+(no cache, 5 s timeout). A kid on either list is revoked (PL263, F-040 rev 15
+D-6): if `sha256("device:" + kid)` (lowercase hex, the bare kid) is in its
+`revoked` array, sign-in is refused as `key-revoked`. If it cannot be read, or
+`revoked` is not an array of 64-character lowercase hex strings, sign-in is
+refused with `key_list_unverified` / `revocations` (HTTP 503). Staging must set
+its own URL: production's list does not name staging's revoked devices.
 
 You must also register an `AppPolicy` on Altimist ID for your app (`appId`,
 `redirectOrigins` pointing at `https://<your-domain>/auth/altimist/callback`, and

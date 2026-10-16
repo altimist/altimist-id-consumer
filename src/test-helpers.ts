@@ -9,6 +9,41 @@ import type { PrismaLike } from './prisma.js';
 
 export const TEST_SESSION_PASSWORD = 'test-password-test-password-test-password';
 
+// Resolver C (PL263): a pinned list key for the signed dead-key list, and a second key
+// nobody pinned. Test-only Ed25519 pairs; the private half (`d`) never leaves this file.
+export const TEST_LIST_PRIVATE: JsonWebKey = {
+  kty: 'OKP', crv: 'Ed25519',
+  x: 'Lk18bMfY7ETjo4I-36D4ru4fmuLazY4EKlL9qYVWvW4', d: 'YshYa5ILIw_vDcygYDlO2pT59O8_RTQrDL81F-QNnO4',
+};
+export const UNPINNED_LIST_PRIVATE: JsonWebKey = {
+  kty: 'OKP', crv: 'Ed25519',
+  x: 'smVFXLHvfQZGat31sxqJawwlIvC0dym5CWdfuXytzt4', d: 'uaovLFV1U9uQVRqlZ5RYo_L6hOU9nTxcJtDf2gEjjmQ',
+};
+export const TEST_LIST_KEY: JsonWebKey = { kty: 'OKP', crv: 'Ed25519', x: TEST_LIST_PRIVATE.x };
+export const TEST_DEADKEYS_URL = 'https://altimist.com/.well-known/signed-key-list.json';
+
+/**
+ * A dead-key list in F-040 rev 15 D-6's shape, signed with Ed25519 over the JCS of the four
+ * fields. Defaults: signed by the pinned test key, issued now, valid for 300 s, seq 1.
+ */
+export async function signedKeyList(
+  keys: string[],
+  o: { seq?: number; issuedAt?: number; validUntil?: number; signWith?: JsonWebKey } = {},
+): Promise<string> {
+  const issuedAtMs = o.issuedAt ?? Date.now();
+  const issuedAt = new Date(issuedAtMs).toISOString();
+  const valid_until = new Date(o.validUntil ?? issuedAtMs + 300_000).toISOString();
+  const seq = o.seq ?? 1;
+  const canonical =
+    `{"issuedAt":${JSON.stringify(issuedAt)},"keys":[${keys.map((k) => JSON.stringify(k)).join(',')}],` +
+    `"seq":${seq},"valid_until":${JSON.stringify(valid_until)}}`;
+  const key = await crypto.subtle.importKey('jwk', o.signWith ?? TEST_LIST_PRIVATE, { name: 'Ed25519' }, false, ['sign']);
+  const sig = Buffer.from(
+    await crypto.subtle.sign({ name: 'Ed25519' }, key, new TextEncoder().encode(canonical)),
+  ).toString('base64url');
+  return JSON.stringify({ keys, issuedAt, valid_until, seq, sig });
+}
+
 interface UserRow {
   id: string;
   did: string;
@@ -195,6 +230,7 @@ export function setup(overrides?: Partial<AidConfig>): TestContext {
     appId: 'test-app',
     allowedIssuers: ['altimist.ai'],
     policy: TEST_POLICY,
+    deadKeys: { url: TEST_DEADKEYS_URL, listKeys: [TEST_LIST_KEY] },
     ...overrides,
   });
   return { store, cfg };
