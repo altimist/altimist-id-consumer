@@ -528,6 +528,85 @@ describe('verifyAndSignIn — the signed dead-key list (Resolver C)', () => {
     expect(store.sessions.size).toBe(0);
   });
 
+  // Review of #17 (Typhoon DG Reviewer 2, BR1112), Major 1: the 5 s limit covers the BODY as well as the headers. A host
+  // that sends headers and then stalls the body must not hold sign-in open. Each fake answers 200 at once with a body
+  // stream that only ends when the request is aborted.
+  const stalledBody = (init?: RequestInit) =>
+    new Response(
+      new ReadableStream({
+        start(c) {
+          init?.signal?.addEventListener('abort', () => c.error(new DOMException('aborted', 'AbortError')));
+        },
+      }),
+      { status: 200 },
+    );
+  it.each([
+    ['the list', 'missing'],
+    ['revocations.json', 'revocations'],
+  ] as const)('gives up on %s when its body stalls after the headers, after 5 s: refused', async (which, reason) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    // The signed list's check is real crypto, so the clock starts only once the stalling URL is asked for.
+    let asked!: () => void;
+    const stalling = new Promise<void>((r) => (asked = r));
+    const stallUrl = which === 'the list' ? TEST_DEADKEYS_URL : REVOCATIONS_URL;
+    fetchMock.mockImplementation(async (url: unknown, init?: RequestInit) => {
+      if (String(url) === stallUrl) {
+        asked();
+        return stalledBody(init);
+      }
+      return String(url) === TEST_DEADKEYS_URL ? listReply() : revocationsReply();
+    });
+    let settled = false;
+    const pending = verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS)).finally(() => {
+      settled = true;
+    });
+    await stalling;
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    vi.useRealTimers();
+    const out = await Promise.race([pending, new Promise((r) => setTimeout(() => r('still pending'), 500))]);
+    expect(out).toEqual({ kind: 'key_list_unverified', reason });
+    refusedWith(reason);
+    expect(store.sessions.size).toBe(0);
+  });
+
+  // Review of #17, Minor 2: a body over 1 MiB is refused before it is buffered whole, whether the host says so
+  // (content-length) or not (a stream), and even when it would verify. It reads as missing, so it fails closed.
+  const ONE_MIB = 1_048_576;
+  it('refuses a list over 1 MiB, even one that verifies: missing', async () => {
+    serveList((await signedKeyList(['dead-1'])) + ' '.repeat(ONE_MIB));
+    expect(await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS))).toEqual({ kind: 'key_list_unverified', reason: 'missing' });
+    refusedWith('missing');
+  });
+  it('refuses a list whose content-length is over 1 MiB without reading it: missing', async () => {
+    const body = await signedKeyList(['dead-1']);
+    let pulled = false;
+    listReply = async () =>
+      new Response(
+        new ReadableStream({
+          pull(c) {
+            pulled = true;
+            c.enqueue(new TextEncoder().encode(body));
+            c.close();
+          },
+        }),
+        { status: 200, headers: { 'content-length': String(ONE_MIB + 1) } },
+      );
+    expect(await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS))).toEqual({ kind: 'key_list_unverified', reason: 'missing' });
+    expect(pulled).toBe(false);
+  });
+  it('refuses a revocations.json over 1 MiB: revocations', async () => {
+    revocationsReply = async () => new Response(JSON.stringify({ revoked: [] }) + ' '.repeat(ONE_MIB), { status: 200 });
+    expect(await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS))).toEqual({ kind: 'key_list_unverified', reason: 'revocations' });
+    refusedWith('revocations');
+  });
+  it('accepts a list just under 1 MiB', async () => {
+    const body = await signedKeyList([]);
+    serveList(body + ' '.repeat(ONE_MIB - body.length));
+    expect((await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS))).kind).not.toBe('key_list_unverified');
+  });
+
   it('refuses a list whose seq is below one this config already accepted (replay)', async () => {
     serveList(await signedKeyList(['dead-1'], { seq: 7 }));
     expect(await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS))).toMatchObject({ kind: 'ok' });

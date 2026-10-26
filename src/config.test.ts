@@ -41,6 +41,9 @@ describe('resolveConfig — required fields', () => {
     ['a kid', { ...TEST_LIST_KEY, kid: 'list-1' }],
     ['a use', { ...TEST_LIST_KEY, use: 'sig' }],
     ['key_ops', { ...TEST_LIST_KEY, key_ops: ['verify'] }],
+    // Review of #17, Minor 1: members that sort after x, so only the member count refuses them.
+    ['a y', { ...TEST_LIST_KEY, y: 'Wq6LfUVbo4Zn_sJWj8qXrVXJ9w8L2nRk4oBj2bL3Xg8' }],
+    ['an x5c', { ...TEST_LIST_KEY, x5c: ['MIIB'] }],
     ['kty EC', { ...TEST_LIST_KEY, kty: 'EC' }],
     ['crv X25519', { ...TEST_LIST_KEY, crv: 'X25519' }],
     ['no x', { kty: 'OKP', crv: 'Ed25519' }],
