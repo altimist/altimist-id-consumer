@@ -188,13 +188,45 @@ export async function verifyAndSignIn(
 /** How long sign-in waits for a list (headers and body) before refusing it as `missing`. */
 const KEY_LIST_TIMEOUT_MS = 5_000;
 
-/** The list body, or `null` (verifySignedKeyList's "missing") on any fetch failure, non-2xx or timeout. */
+/**
+ * The most a list (or revocations.json) may be: 1 MiB. A larger body is refused before it is buffered whole (review of
+ * #17, Minor 2). Assumed to be well above Resolver D's worst case (every revoked device key plus released handles' keys).
+ */
+const KEY_LIST_MAX_BYTES = 1_048_576;
+
+/** The list body, or `null` (verifySignedKeyList's "missing") on any fetch failure, non-2xx, timeout or over-size body. */
 async function fetchKeyList(url: string): Promise<string | null> {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), KEY_LIST_TIMEOUT_MS);
   try {
     const res = await fetch(url, { cache: 'no-store', signal: abort.signal });
-    return res.ok ? await res.text() : null;
+    if (!res.ok) return null;
+    if (Number(res.headers.get('content-length')) > KEY_LIST_MAX_BYTES) {
+      await res.body?.cancel().catch(() => {});
+      return null;
+    }
+    if (!res.body) return '';
+    // Read with a running count, inside the same 5 s: the timer covers the body as well as the headers.
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > KEY_LIST_MAX_BYTES) {
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(value);
+    }
+    const body = new Uint8Array(size);
+    let at = 0;
+    for (const c of chunks) {
+      body.set(c, at);
+      at += c.byteLength;
+    }
+    return new TextDecoder().decode(body);
   } catch {
     return null;
   } finally {

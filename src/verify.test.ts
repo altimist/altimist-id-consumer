@@ -590,7 +590,7 @@ describe('verifyAndSignIn — the signed dead-key list (Resolver C)', () => {
             c.enqueue(new TextEncoder().encode(body));
             c.close();
           },
-        }),
+        }, { highWaterMark: 0 }), // pull only when something reads, not to fill a queue
         { status: 200, headers: { 'content-length': String(ONE_MIB + 1) } },
       );
     expect(await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS))).toEqual({ kind: 'key_list_unverified', reason: 'missing' });
