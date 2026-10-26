@@ -32,13 +32,15 @@ function initErrorMessage(error: string | undefined): string {
   return 'Sign-in failed to start. Try again.';
 }
 
-function verifyErrorMessage(error: string | undefined): string {
+/** @internal Exported for its test only. */
+export function verifyErrorMessage(error: string | undefined): string {
   switch (error) {
     case 'invalid_jwt':
       return 'Sign-in could not be verified. Try again.';
     case 'issuer_not_allowed':
       return "That identity provider isn't accepted here.";
     case 'release_unavailable':
+    case 'key_list_unverified':
       return 'AltimistID is temporarily unavailable. Try again in a moment.';
     default:
       return 'Sign-in could not be completed. Try again.';

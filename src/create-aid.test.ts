@@ -1,13 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import { createAid } from './create-aid.js';
 import { configFromEnv } from './config.js';
-import { inMemoryStore, TEST_SESSION_PASSWORD, type InMemoryStore } from './test-helpers.js';
+import {
+  inMemoryStore,
+  TEST_SESSION_PASSWORD,
+  TEST_DEADKEYS_URL,
+  TEST_LIST_KEY,
+  type InMemoryStore,
+} from './test-helpers.js';
 
 function make(store: InMemoryStore) {
   return createAid({
     store,
     sessionPassword: TEST_SESSION_PASSWORD,
     appId: 'test-app',
+    deadKeys: { url: TEST_DEADKEYS_URL, listKeys: [TEST_LIST_KEY] },
     policy: { staffOnlyPages: ['/admin'], visitorGetAllowlist: ['/api/public'] },
   });
 }
@@ -31,17 +38,31 @@ describe('createAid — wiring', () => {
   });
 
   it('accepts the configFromEnv() spread pattern (sessionPassword/appId from env)', () => {
-    const prev = { sp: process.env.SESSION_PASSWORD, app: process.env.ALTIMIST_APP_ID };
+    const prev = {
+      sp: process.env.SESSION_PASSWORD,
+      app: process.env.ALTIMIST_APP_ID,
+      dkUrl: process.env.SIGNED_KEY_LIST_URL,
+      dkKeys: process.env.SIGNED_KEY_LIST_PUBLIC_JWKS,
+    };
     process.env.SESSION_PASSWORD = 'x'.repeat(40);
     process.env.ALTIMIST_APP_ID = 'env-app';
+    process.env.SIGNED_KEY_LIST_URL = TEST_DEADKEYS_URL;
+    process.env.SIGNED_KEY_LIST_PUBLIC_JWKS = JSON.stringify([TEST_LIST_KEY]);
     try {
       // This is the canonical greenfield pattern; it must both typecheck (spread
       // of Partial<AidConfig>) and construct at runtime.
       const aid = createAid({ ...configFromEnv(), store: inMemoryStore() });
       expect(aid.middlewareConfig.runtime).toBe('nodejs');
     } finally {
-      process.env.SESSION_PASSWORD = prev.sp;
-      process.env.ALTIMIST_APP_ID = prev.app;
+      for (const [k, v] of [
+        ['SESSION_PASSWORD', prev.sp],
+        ['ALTIMIST_APP_ID', prev.app],
+        ['SIGNED_KEY_LIST_URL', prev.dkUrl],
+        ['SIGNED_KEY_LIST_PUBLIC_JWKS', prev.dkKeys],
+      ] as const) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
     }
   });
 

@@ -115,6 +115,8 @@ export function createRoutes(deps: ResolvedConfig): AidRoutes {
         return NextResponse.json({ error: 'consent_required', consentUrl: out.consentUrl }, { status: 403 });
       case 'release_unavailable':
         return NextResponse.json({ error: 'release_unavailable' }, { status: 502 });
+      case 'key_list_unverified':
+        return NextResponse.json({ error: 'key_list_unverified', reason: out.reason }, { status: 503 });
     }
   };
 

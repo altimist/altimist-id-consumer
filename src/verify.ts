@@ -5,8 +5,8 @@
  * presence: a verified staff VC from the team hub ⇒ staff; anything else ⇒
  * visitor. A missing staff VC is NOT a refusal — it's the visitor path.
  *
- * Fail-closed: issuer-allowlist miss, bridge-verify failure, or a release outage
- * all deny sign-in; they never default-allow.
+ * Fail-closed: issuer-allowlist miss, bridge-verify failure, an unverified
+ * dead-key list, or a release outage all deny sign-in; they never default-allow.
  *
  * Takes `ResolvedConfig` as deps. The JIT race is handled here, Prisma-agnostically
  * (no error-code inspection), so the core stays free of any Prisma dependency.
@@ -18,6 +18,9 @@ import {
   fetchTeamIssuer,
   peekBridgeJwt,
   parseDid,
+  verifySignedKeyList,
+  decideKeyListUse,
+  type KeyListFailure,
 } from '@altimist/did-web-client';
 import type { Role } from './policy.js';
 import type { ResolvedConfig } from './config.js';
@@ -29,7 +32,8 @@ export type VerifyOutcome =
   | { kind: 'invalid_jwt'; reason: string }
   | { kind: 'issuer_not_allowed'; host: string }
   | { kind: 'consent_required'; consentUrl: string }
-  | { kind: 'release_unavailable' };
+  | { kind: 'release_unavailable' }
+  | { kind: 'key_list_unverified'; reason: KeyListFailure | 'revocations' };
 
 /**
  * PL212 (BPM105): an allowlist entry admits its exact host and hosts exactly one
@@ -96,6 +100,60 @@ export async function verifyAndSignIn(
   const handle = verified.handle;
   const subjectDid = iss; // canonical DID the VC subject must match
 
+  // 2b) Resolver C (PL263, F-040 rev 15 D-6): the bridge key must not be on the signed
+  //     dead-key list. Sign-in is consequence-bearing, so the list is used with the
+  //     'settlement' intent only: any failure refuses, and a list that did not verify is
+  //     never read as an empty one (F-040 rev 15 AC6, rev 14 AC24).
+  const decision = decideKeyListUse(
+    await verifySignedKeyList(await fetchKeyList(deps.deadKeysUrl), {
+      listKeys: deps.deadKeysListKeys,
+      now: Date.now(),
+      seen: deps.deadKeysSeen,
+    }),
+    'settlement',
+  );
+  if (!decision.use) {
+    await safeAudit(deps.store, 'altimist.signin.refused', 'fail', {
+      reason: 'key_list_unverified',
+      listFailure: decision.reason,
+      host: issHost,
+    });
+    return { kind: 'key_list_unverified', reason: decision.reason };
+  }
+  // The contract on both sides is a bare kid: `verified.kid` is the fragment of the method
+  // that verified the signature (not the header's hint), and the list holds bare credential
+  // IDs (D-6: DeadKey.kid = Device.kid). A full DID URL on the list would not match.
+  if (decision.keys.includes(verified.kid)) {
+    await safeAudit(deps.store, 'altimist.signin.refused', 'fail', {
+      reason: 'key_revoked',
+      kid: verified.kid,
+      handle,
+    });
+    return { kind: 'invalid_jwt', reason: 'key-revoked' };
+  }
+  // 2c) PL263 / F-040 rev 15 D-6: a kid on revocations.json OR on the signed list is revoked.
+  //     altimist-id writes a device revocation as sha256("device:" + bare kid), lowercase hex.
+  //     Read here rather than with did-web-client's isRevoked, which has no timeout and reads a
+  //     body without a `revoked` array as "nothing revoked" (fail-open). Any failure refuses.
+  const revoked = await fetchRevocations(deps.revocationsUrl);
+  if (!revoked) {
+    await safeAudit(deps.store, 'altimist.signin.refused', 'fail', {
+      reason: 'key_list_unverified',
+      listFailure: 'revocations',
+      host: issHost,
+    });
+    return { kind: 'key_list_unverified', reason: 'revocations' };
+  }
+  if (revoked.includes(await sha256Hex(`device:${verified.kid}`))) {
+    await safeAudit(deps.store, 'altimist.signin.refused', 'fail', {
+      reason: 'key_revoked',
+      kid: verified.kid,
+      handle,
+      via: 'revocations',
+    });
+    return { kind: 'invalid_jwt', reason: 'key-revoked' };
+  }
+
   // 3) Request the user's staff VC(s). A release outage fails the sign-in;
   //    consent_required is a pending state surfaced to the UI, not a refusal.
   const staffVcTypes = [...deps.staffScopes];
@@ -125,6 +183,75 @@ export async function verifyAndSignIn(
   const role = await roleFromReleasedVcs(deps, release.vcs, subjectDid);
 
   return finishSignIn(deps, subjectDid, handle, role);
+}
+
+/** How long sign-in waits for a list (headers and body) before refusing it as `missing`. */
+const KEY_LIST_TIMEOUT_MS = 5_000;
+
+/**
+ * The most a list (or revocations.json) may be: 1 MiB. A larger body is refused before it is buffered whole (review of
+ * #17, Minor 2). Assumed to be well above Resolver D's worst case (every revoked device key plus released handles' keys).
+ */
+const KEY_LIST_MAX_BYTES = 1_048_576;
+
+/** The list body, or `null` (verifySignedKeyList's "missing") on any fetch failure, non-2xx, timeout or over-size body. */
+async function fetchKeyList(url: string): Promise<string | null> {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), KEY_LIST_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { cache: 'no-store', signal: abort.signal });
+    if (!res.ok) return null;
+    if (Number(res.headers.get('content-length')) > KEY_LIST_MAX_BYTES) {
+      await res.body?.cancel().catch(() => {});
+      return null;
+    }
+    if (!res.body) return '';
+    // Read with a running count, inside the same 5 s: the timer covers the body as well as the headers.
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > KEY_LIST_MAX_BYTES) {
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(value);
+    }
+    const body = new Uint8Array(size);
+    let at = 0;
+    for (const c of chunks) {
+      body.set(c, at);
+      at += c.byteLength;
+    }
+    return new TextDecoder().decode(body);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** A revocation entry: sha256 as 64 lowercase hex. Anything else could never match (NH283 n8). */
+const REVOCATION_HASH = /^[0-9a-f]{64}$/;
+
+/** `revoked` as an array of hashes, or `null` on any fetch failure, non-2xx, timeout or malformed body. */
+async function fetchRevocations(url: string): Promise<string[] | null> {
+  const body = await fetchKeyList(url);
+  if (body === null) return null;
+  try {
+    const revoked: unknown = (JSON.parse(body) as { revoked?: unknown } | null)?.revoked;
+    return Array.isArray(revoked) && revoked.every((h) => typeof h === 'string' && REVOCATION_HASH.test(h)) ? revoked : null;
+  } catch {
+    return null;
+  }
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 async function roleFromReleasedVcs(

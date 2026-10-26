@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createHash } from 'node:crypto';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock only the I/O boundary of the AID client; keep the pure helpers
 // (peekBridgeJwt, parseDid, isIssuerAllowed) real so the issuer-allowlist and
@@ -23,7 +24,14 @@ import {
   fetchTeamIssuer,
 } from '@altimist/did-web-client';
 import { verifyAndSignIn } from './verify.js';
-import { setup, inMemoryStore, type InMemoryStore } from './test-helpers.js';
+import {
+  setup,
+  inMemoryStore,
+  signedKeyList,
+  TEST_DEADKEYS_URL,
+  UNPINNED_LIST_PRIVATE,
+  type InMemoryStore,
+} from './test-helpers.js';
 import type { ResolvedConfig } from './config.js';
 
 type Mock = ReturnType<typeof vi.fn>;
@@ -37,8 +45,8 @@ const m = {
 function b64url(obj: unknown): string {
   return Buffer.from(JSON.stringify(obj)).toString('base64url');
 }
-function makeBridgeJwt(iss: string): string {
-  const header = { alg: 'WEBAUTHN-ES256', typ: 'JWT+WAS', kid: 'k1' };
+function makeBridgeJwt(iss: string, kid = 'k1'): string {
+  const header = { alg: 'WEBAUTHN-ES256', typ: 'JWT+WAS', kid };
   const payload = { iss, sub: iss, iat: 0, exp: 0, jti: 'jti-1' };
   return `${b64url(header)}.${b64url(payload)}.${b64url({ sig: 'x' })}`;
 }
@@ -49,13 +57,37 @@ const FED_ISS = 'did:web:patrickjv.com';
 let store: InMemoryStore;
 let cfg: ResolvedConfig;
 
-beforeEach(() => {
+let fetchMock: Mock;
+let listReply: () => Promise<Response>;
+let revocationsReply: () => Promise<Response>;
+/** Serve `body` as the dead-key list (status 200), or answer with `status` and no list. */
+function serveList(body: string, status = 200) {
+  listReply = async () => new Response(body, { status });
+}
+const REVOCATIONS_URL = 'https://altimist.com/.well-known/revocations.json';
+/** altimist-id writes a device revocation as hex sha256("device:" + bare kid) (F-040 D-6). */
+const deviceHash = (kid: string) => createHash('sha256').update(`device:${kid}`).digest('hex');
+
+beforeEach(async () => {
   vi.clearAllMocks();
   ({ store, cfg } = setup());
+  fetchMock = vi.fn(async (url: unknown) => {
+    if (String(url) === TEST_DEADKEYS_URL) return listReply();
+    if (String(url) === REVOCATIONS_URL) return revocationsReply();
+    return new Response('not found', { status: 404 });
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  serveList(await signedKeyList(['dead-1']));
+  revocationsReply = async () => Response.json({ revoked: [] });
 
   m.verifyBridgeJwt.mockResolvedValue({ ok: true, handle: 'nathan', kid: 'k1', jti: 'jti-1', iat: 0, exp: 0 });
   m.fetchTeamIssuer.mockResolvedValue({ team: 'altimist', jwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' } });
   m.releaseVcs.mockResolvedValue({ ok: true, vcs: [] });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 function userByDid(did: string) {
@@ -283,5 +315,320 @@ describe('verifyAndSignIn — audit', () => {
     expect(store.audits).toContainEqual(
       expect.objectContaining({ event: 'altimist.signin.refused', outcome: 'fail' }),
     );
+  });
+});
+
+// Resolver C (PL263, F-040 rev 15 D-6): before sign-in completes, the consumer fetches the signed
+// dead-key list from config, verifies it with did-web-client's verifySignedKeyList, and uses it
+// only through decideKeyListUse(check, 'settlement'). Any failure refuses the sign-in; a key on
+// the list is revoked. F-040 rev 15 AC6 (rev 14 AC24): never project from an empty set.
+describe('verifyAndSignIn — the signed dead-key list (Resolver C)', () => {
+  const refusedWith = (reason: string) =>
+    expect(store.audits).toContainEqual(
+      expect.objectContaining({
+        event: 'altimist.signin.refused',
+        outcome: 'fail',
+        metadata: expect.objectContaining({ reason: 'key_list_unverified', listFailure: reason }),
+      }),
+    );
+
+  it('fetches the list from the configured URL and signs in when the bridge key is not on it', async () => {
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    expect(out).toMatchObject({ kind: 'ok', handle: 'nathan' });
+    expect(fetchMock.mock.calls.map(([u]) => String(u))).toEqual([TEST_DEADKEYS_URL, REVOCATIONS_URL]);
+    // Never a cached copy: a cache could hide a key struck off a moment ago (NH219 n3).
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ cache: 'no-store' });
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ cache: 'no-store' });
+  });
+
+  // PL263 / F-040 D-6: a kid on revocations.json OR on the signed list is revoked (BR2311, from
+  // BR2280 M2 on mission-control#815). altimist-id writes a device revocation to
+  // revocations.json as sha256("device:" + bare kid), so a key revoked there before Resolver D
+  // re-signs the list is refused too.
+  it('refuses a bridge key whose sha256("device:" + kid) is on revocations.json, though the signed list passes', async () => {
+    revocationsReply = async () => Response.json({ revoked: [deviceHash('other'), deviceHash('k1')] });
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    expect(out).toEqual({ kind: 'invalid_jwt', reason: 'key-revoked' });
+    expect(store.sessions.size).toBe(0);
+    expect(m.releaseVcs).not.toHaveBeenCalled();
+    expect(store.audits).toContainEqual(
+      expect.objectContaining({
+        event: 'altimist.signin.refused',
+        metadata: expect.objectContaining({ reason: 'key_revoked', kid: 'k1', via: 'revocations' }),
+      }),
+    );
+  });
+
+  // NH283 m5 / BR2391: the URL is config (default production's list); staging sets its own.
+  it('reads revocations.json from the configured URL, not the production default', async () => {
+    const STAGING_REVOCATIONS = 'https://id.staging.altimist.ai/api/resolver/revocations';
+    fetchMock.mockImplementation(async (url: unknown) => {
+      if (String(url) === TEST_DEADKEYS_URL) return listReply();
+      if (String(url) === STAGING_REVOCATIONS) return Response.json({ revoked: [deviceHash('k1')] });
+      return Response.json({ revoked: [] });
+    });
+    const out = await verifyAndSignIn({ ...cfg, revocationsUrl: STAGING_REVOCATIONS }, makeBridgeJwt(ALT_ISS));
+    expect(out).toEqual({ kind: 'invalid_jwt', reason: 'key-revoked' });
+    expect(fetchMock.mock.calls.map(([u]) => String(u))).toEqual([TEST_DEADKEYS_URL, STAGING_REVOCATIONS]);
+  });
+
+  it('checks the signing kid on revocations.json, not the header hint', async () => {
+    m.verifyBridgeJwt.mockResolvedValue({ ok: true, handle: 'nathan', kid: 'dead-k', jti: 'jti-1', iat: 0, exp: 0 });
+    revocationsReply = async () => Response.json({ revoked: [deviceHash('dead-k')] });
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS, 'live-k'));
+    expect(out).toEqual({ kind: 'invalid_jwt', reason: 'key-revoked' });
+  });
+
+  it('signs in when revocations.json names only other keys, the kid hashed without "device:", or "device:" twice', async () => {
+    const plainHash = createHash('sha256').update('k1').digest('hex');
+    revocationsReply = async () => Response.json({ revoked: [deviceHash('k2'), plainHash, deviceHash('device:k1')] });
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    expect(out).toMatchObject({ kind: 'ok' });
+  });
+
+  // An unreadable revocations.json fails closed, like an unusable list: 503, nothing released.
+  it.each([
+    ['answers 404', async () => new Response('not found', { status: 404 })],
+    ['answers 503', async () => new Response('', { status: 503 })],
+    ['the fetch throws', async () => { throw new TypeError('fetch failed'); }],
+    ['is not JSON', async () => new Response('<html>', { status: 200 })],
+    ['has no revoked array', async () => Response.json({})],
+    ['has a revoked that is not an array', async () => Response.json({ revoked: 'k1' })],
+    ['has a non-string entry', async () => Response.json({ revoked: [1] })],
+    // NH283 n8: every entry is 64 lowercase hex. Anything else can never match, so it is malformed.
+    ['has the signing kid upper-cased', async () => Response.json({ revoked: [deviceHash('k1').toUpperCase()] })],
+    ['has a space-padded entry', async () => Response.json({ revoked: [` ${deviceHash('k1')}`] })],
+    ['has the bare kid, not a hash', async () => Response.json({ revoked: ['k1'] })],
+    ['has a 63-character entry', async () => Response.json({ revoked: [deviceHash('k1').slice(1)] })],
+  ] as const)('revocations.json %s: refused as key_list_unverified (revocations)', async (_name, reply) => {
+    revocationsReply = reply;
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    expect(out).toEqual({ kind: 'key_list_unverified', reason: 'revocations' });
+    expect(store.sessions.size).toBe(0);
+    expect(m.releaseVcs).not.toHaveBeenCalled();
+    refusedWith('revocations');
+  });
+
+  it('gives up on a revocations.json host that never answers after 5 s: refused', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    // The signed list's check is real crypto, so start the clock only once revocations.json is asked for.
+    let asked!: () => void;
+    const revocationsAsked = new Promise<void>((r) => (asked = r));
+    fetchMock.mockImplementation(async (url: unknown, init?: RequestInit) => {
+      if (String(url) === TEST_DEADKEYS_URL) return listReply();
+      asked();
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      });
+    });
+    let settled = false;
+    const pending = verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS)).finally(() => {
+      settled = true;
+    });
+    await revocationsAsked;
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    vi.useRealTimers();
+    const out = await Promise.race([pending, new Promise((r) => setTimeout(() => r('still pending'), 500))]);
+    expect(out).toEqual({ kind: 'key_list_unverified', reason: 'revocations' });
+    expect(store.sessions.size).toBe(0);
+  });
+
+  it('a verified list with no keys on it is a real answer: sign-in proceeds', async () => {
+    serveList(await signedKeyList([]));
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    expect(out).toMatchObject({ kind: 'ok' });
+  });
+
+  // The list is checked against the key that VERIFIED the signature (verifyBridgeJwt's kid),
+  // never the header's hint: verifyBridgeJwt tries every method in the DID document, so a dead
+  // key can sign while the header names a live one (NH219 m1).
+  it('refuses a dead signing key whose header names a live key', async () => {
+    serveList(await signedKeyList(['dead-k']));
+    m.verifyBridgeJwt.mockResolvedValue({ ok: true, handle: 'nathan', kid: 'dead-k', jti: 'jti-1', iat: 0, exp: 0 });
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS, 'live-k'));
+    expect(out).toMatchObject({ kind: 'invalid_jwt', reason: 'key-revoked' });
+    expect(store.sessions.size).toBe(0);
+    expect(m.releaseVcs).not.toHaveBeenCalled();
+  });
+
+  it('refuses a bridge key that is on the verified list, before any VC release', async () => {
+    serveList(await signedKeyList(['dead-1', 'k1']));
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    expect(out).toMatchObject({ kind: 'invalid_jwt', reason: 'key-revoked' });
+    expect(store.users.size).toBe(0);
+    expect(store.sessions.size).toBe(0);
+    expect(m.releaseVcs).not.toHaveBeenCalled();
+    expect(store.audits).toContainEqual(
+      expect.objectContaining({
+        event: 'altimist.signin.refused',
+        metadata: expect.objectContaining({ reason: 'key_revoked', kid: 'k1' }),
+      }),
+    );
+  });
+
+  // Each failure refuses, although the bridge key (k1) is on none of these lists: a caller that
+  // treated a failed list as an empty one would sign every one of these in (AC6).
+  it.each([
+    ['missing: the list URL answers 404', 'missing', async () => serveList('not found', 404)],
+    ['missing: the list URL answers 503', 'missing', async () => serveList('', 503)],
+    ['missing: the body is empty', 'missing', async () => serveList('')],
+    ['missing: the fetch throws', 'missing', async () => fetchMock.mockRejectedValue(new TypeError('fetch failed'))],
+    ['malformed: not a list', 'malformed', async () => serveList('{"keys":"k2"}')],
+    ['signature: signed by a key nobody pinned', 'signature', async () =>
+      serveList(await signedKeyList(['dead-1'], { signWith: UNPINNED_LIST_PRIVATE }))],
+    ['signature: a dead key struck off after signing', 'signature', async () => {
+      const l = JSON.parse(await signedKeyList(['dead-1']));
+      serveList(JSON.stringify({ ...l, keys: [] }));
+    }],
+    ['expired: valid_until has passed', 'expired', async () =>
+      serveList(await signedKeyList(['dead-1'], { issuedAt: Date.now() - 600_000 }))],
+    // did-web-client 57db6c1 threw out of verifyAndSignIn on this (a 500, no audit row; NH219 M1).
+    ['signature: a sig of length 1 mod 4 (AAAAA)', 'signature', async () => {
+      const l = JSON.parse(await signedKeyList(['dead-1']));
+      serveList(JSON.stringify({ ...l, sig: 'AAAAA' }));
+    }],
+    // A signed list may live 300 s at most (F-040 rev 15 D-6); 57db6c1 accepted both (NH219 M1).
+    ['expired: valid_until a year out', 'expired', async () =>
+      serveList(await signedKeyList(['dead-1'], { validUntil: Date.now() + 365 * 86_400_000 }))],
+    ['expired: issuedAt an hour in the future', 'expired', async () =>
+      serveList(await signedKeyList(['dead-1'], { issuedAt: Date.now() + 3_600_000 }))],
+  ])('%s: refused as key_list_unverified, nothing projected', async (_name, reason, arrange) => {
+    await arrange();
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    expect(out).toEqual({ kind: 'key_list_unverified', reason });
+    expect(store.users.size).toBe(0);
+    expect(store.sessions.size).toBe(0);
+    expect(m.releaseVcs).not.toHaveBeenCalled();
+    refusedWith(reason);
+  });
+
+  // A list host that accepts the connection and never answers must not hold sign-in open: after
+  // 5 s the fetch is aborted, which is `missing`, so 503 (NH219 m2).
+  it('gives up on a list host that never answers after 5 s: missing, refused', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    fetchMock.mockImplementation(
+      (_url: string, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+        }),
+    );
+    let settled = false;
+    const pending = verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS)).finally(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    vi.useRealTimers();
+    const out = await Promise.race([pending, new Promise((r) => setTimeout(() => r('still pending'), 500))]);
+    expect(out).toEqual({ kind: 'key_list_unverified', reason: 'missing' });
+    refusedWith('missing');
+    expect(store.sessions.size).toBe(0);
+  });
+
+  // Review of #17 (Typhoon DG Reviewer 2, BR1112), Major 1: the 5 s limit covers the BODY as well as the headers. A host
+  // that sends headers and then stalls the body must not hold sign-in open. Each fake answers 200 at once with a body
+  // stream that only ends when the request is aborted.
+  const stalledBody = (init?: RequestInit) =>
+    new Response(
+      new ReadableStream({
+        start(c) {
+          init?.signal?.addEventListener('abort', () => c.error(new DOMException('aborted', 'AbortError')));
+        },
+      }),
+      { status: 200 },
+    );
+  it.each([
+    ['the list', 'missing'],
+    ['revocations.json', 'revocations'],
+  ] as const)('gives up on %s when its body stalls after the headers, after 5 s: refused', async (which, reason) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    // The signed list's check is real crypto, so the clock starts only once the stalling URL is asked for.
+    let asked!: () => void;
+    const stalling = new Promise<void>((r) => (asked = r));
+    const stallUrl = which === 'the list' ? TEST_DEADKEYS_URL : REVOCATIONS_URL;
+    fetchMock.mockImplementation(async (url: unknown, init?: RequestInit) => {
+      if (String(url) === stallUrl) {
+        asked();
+        return stalledBody(init);
+      }
+      return String(url) === TEST_DEADKEYS_URL ? listReply() : revocationsReply();
+    });
+    let settled = false;
+    const pending = verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS)).finally(() => {
+      settled = true;
+    });
+    await stalling;
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    vi.useRealTimers();
+    const out = await Promise.race([pending, new Promise((r) => setTimeout(() => r('still pending'), 500))]);
+    expect(out).toEqual({ kind: 'key_list_unverified', reason });
+    refusedWith(reason);
+    expect(store.sessions.size).toBe(0);
+  });
+
+  // Review of #17, Minor 2: a body over 1 MiB is refused before it is buffered whole, whether the host says so
+  // (content-length) or not (a stream), and even when it would verify. It reads as missing, so it fails closed.
+  const ONE_MIB = 1_048_576;
+  it('refuses a list over 1 MiB, even one that verifies: missing', async () => {
+    serveList((await signedKeyList(['dead-1'])) + ' '.repeat(ONE_MIB));
+    expect(await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS))).toEqual({ kind: 'key_list_unverified', reason: 'missing' });
+    refusedWith('missing');
+  });
+  it('refuses a list whose content-length is over 1 MiB without reading it: missing', async () => {
+    const body = await signedKeyList(['dead-1']);
+    let pulled = false;
+    listReply = async () =>
+      new Response(
+        new ReadableStream({
+          pull(c) {
+            pulled = true;
+            c.enqueue(new TextEncoder().encode(body));
+            c.close();
+          },
+        }, { highWaterMark: 0 }), // pull only when something reads, not to fill a queue
+        { status: 200, headers: { 'content-length': String(ONE_MIB + 1) } },
+      );
+    expect(await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS))).toEqual({ kind: 'key_list_unverified', reason: 'missing' });
+    expect(pulled).toBe(false);
+  });
+  it('refuses a revocations.json over 1 MiB: revocations', async () => {
+    revocationsReply = async () => new Response(JSON.stringify({ revoked: [] }) + ' '.repeat(ONE_MIB), { status: 200 });
+    expect(await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS))).toEqual({ kind: 'key_list_unverified', reason: 'revocations' });
+    refusedWith('revocations');
+  });
+  it('accepts a list just under 1 MiB', async () => {
+    const body = await signedKeyList([]);
+    serveList(body + ' '.repeat(ONE_MIB - body.length));
+    expect((await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS))).kind).not.toBe('key_list_unverified');
+  });
+
+  it('refuses a list whose seq is below one this config already accepted (replay)', async () => {
+    serveList(await signedKeyList(['dead-1'], { seq: 7 }));
+    expect(await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS))).toMatchObject({ kind: 'ok' });
+
+    serveList(await signedKeyList([], { seq: 6 }));
+    const out = await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    expect(out).toEqual({ kind: 'key_list_unverified', reason: 'seq' });
+    refusedWith('seq');
+  });
+
+  it('keeps the seq high-water per config: a fresh config starts with none', async () => {
+    serveList(await signedKeyList([], { seq: 7 }));
+    await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    ({ store, cfg } = setup());
+    serveList(await signedKeyList([], { seq: 6 }));
+    expect(await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS))).toMatchObject({ kind: 'ok' });
+  });
+
+  it('does not fetch the list for a token refused earlier (issuer, bridge)', async () => {
+    await verifyAndSignIn(cfg, makeBridgeJwt('did:web:evil.com'));
+    m.verifyBridgeJwt.mockResolvedValue({ ok: false, reason: 'verification-failed' });
+    await verifyAndSignIn(cfg, makeBridgeJwt(ALT_ISS));
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
